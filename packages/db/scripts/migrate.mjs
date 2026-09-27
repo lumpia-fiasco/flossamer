@@ -5,6 +5,13 @@ import pg from "pg";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("Set DATABASE_URL (Neon: use the direct, non-pooled connection string for migrations).");
+if (!/^postgres(ql)?:\/\//.test(url)) {
+  // `vercel env pull` writes "[SENSITIVE]" for sensitive variables instead of their values.
+  throw new Error(
+    `DATABASE_URL isn't a Postgres connection string (got ${url.length} characters starting "${url.slice(0, 12)}"). ` +
+      "If it came from `vercel env pull`, copy the real string from the Neon console instead.",
+  );
+}
 
 const dir = fileURLToPath(new URL("../migrations/", import.meta.url));
 const client = new pg.Client({ connectionString: url });
