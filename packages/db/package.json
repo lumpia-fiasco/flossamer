@@ -1,0 +1,20 @@
+{
+  "name": "@flossamer/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "@flossamer/core": "*",
+    "pg": "^8"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5",
+    "@types/pg": "^8"
+  }
+}

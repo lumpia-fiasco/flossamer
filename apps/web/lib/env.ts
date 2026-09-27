@@ -1,8 +1,8 @@
 /**
- * Demo mode: with no Supabase project configured, the app runs on the sample
- * studio from @flossamer/core so it can be developed and shown without accounts.
+ * Demo mode: with no database configured, the app runs on the sample studio
+ * from @flossamer/core so it can be developed and shown without accounts.
  */
-export const isDemo = !process.env.NEXT_PUBLIC_SUPABASE_URL;
+export const isDemo = !process.env.DATABASE_URL;
 
 export function required(name: string): string {
   const value = process.env[name];

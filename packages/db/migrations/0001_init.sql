@@ -1,10 +1,12 @@
 -- Flossamer MVP schema (PRD v2.1, section 9).
 -- Stores references and short summaries, never full message bodies (section 10).
--- Every table is scoped to a studio and protected by row-level security.
+-- Every table is scoped to a studio; every query in packages/db filters by studio_id,
+-- and the tests in packages/db prove it.
 
 create table studios (
   id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null unique references auth.users on delete cascade,
+  google_sub text not null unique,                -- Google account id from sign-in
+  owner_email text not null,
   display_name text,
   profile jsonb not null default '{}',            -- services, ideal clients, typical engagements
   voice jsonb,                                    -- VoiceProfile, learned from sent mail
@@ -148,38 +150,8 @@ create table agent_actions (
   at timestamptz not null default now()
 );
 
--- Row-level security: a user sees only their own studio's rows.
-alter table studios enable row level security;
-create policy own_studio on studios using (owner_id = auth.uid());
-
-do $$
-declare t text;
-begin
-  foreach t in array array['integrations','organizations','people','person_emails','interactions',
-                           'seen_messages','projects','signals','agent_actions']
-  loop
-    execute format('alter table %I enable row level security', t);
-    execute format(
-      'create policy own_rows on %I using (studio_id in (select id from studios where owner_id = auth.uid()))', t);
-  end loop;
-end $$;
-
--- OAuth tokens live apart from integrations. RLS is on with no policies, so only the
--- service role (server and background jobs) can read or write them.
+-- OAuth tokens live apart from integrations so no general query or export can include them.
 create table integration_secrets (
   integration_id uuid primary key references integrations on delete cascade,
   refresh_token_encrypted text not null            -- AES-256-GCM with TOKEN_ENCRYPTION_KEY
 );
-alter table integration_secrets enable row level security;
-
-alter table person_organizations enable row level security;
-create policy own_rows on person_organizations
-  using (person_id in (select p.id from people p join studios s on s.id = p.studio_id where s.owner_id = auth.uid()));
-
-alter table project_people enable row level security;
-create policy own_rows on project_people
-  using (project_id in (select p.id from projects p join studios s on s.id = p.studio_id where s.owner_id = auth.uid()));
-
-alter table project_threads enable row level security;
-create policy own_rows on project_threads
-  using (project_id in (select p.id from projects p join studios s on s.id = p.studio_id where s.owner_id = auth.uid()));

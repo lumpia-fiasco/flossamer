@@ -1,28 +1,21 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
-import { GMAIL_SCOPES, isDemo } from "@/lib/env";
-import { createClient } from "@/lib/supabase/server";
+import { signIn } from "@/auth";
+import { isDemo } from "@/lib/env";
+
+const ERRORS: Record<string, string> = {
+  scopes: "Flossamer needs both Gmail permissions: read, to find business conversations, and drafts, to save replies. Please allow both.",
+  deleted: "Your account and data were deleted.",
+};
 
 async function signInWithGoogle() {
   "use server";
-  const supabase = await createClient();
-  const origin = (await headers()).get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL;
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${origin}/auth/callback`,
-      scopes: GMAIL_SCOPES.join(" "),
-      // Offline access + consent so Google returns a refresh token for background sync.
-      queryParams: { access_type: "offline", prompt: "consent" },
-    },
-  });
-  if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
-  redirect(data.url);
+  await signIn("google", { redirectTo: "/" });
 }
 
 export default async function Login({ searchParams }: PageProps<"/login">) {
   if (isDemo) redirect("/");
   const { error } = await searchParams;
+  const message = typeof error === "string" ? (ERRORS[error] ?? "Sign-in failed. Please try again.") : null;
 
   return (
     <div className="mx-auto max-w-xl px-4 py-16 md:py-24">
@@ -38,9 +31,9 @@ export default async function Login({ searchParams }: PageProps<"/login">) {
       <form action={signInWithGoogle} className="mt-10">
         <button className="rounded-md bg-ink px-5 py-2.5 text-paper">Continue with Google</button>
       </form>
-      {error && (
-        <p role="alert" className="mt-4 text-sm text-accent">
-          {typeof error === "string" ? error : "Sign-in failed. Please try again."}
+      {message && (
+        <p role="alert" className="mt-4 max-w-md text-sm text-accent">
+          {message}
         </p>
       )}
     </div>

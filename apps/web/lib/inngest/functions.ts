@@ -1,9 +1,9 @@
 import { addDays } from "@flossamer/core";
 import { GmailAuthError } from "@flossamer/mail";
 import { NonRetriableError } from "inngest";
+import * as repo from "@flossamer/db";
+import { db } from "@/lib/db";
 import * as ingest from "@/lib/ingest";
-import * as repo from "@/lib/repo";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { EVENTS, inngest, type IntegrationEventData } from "./client";
 
 /** Threads per extraction step: small enough to finish well inside a serverless timeout. */
@@ -25,7 +25,7 @@ async function ingestAll(step: Step, data: IntegrationEventData, after: string, 
         return await ingest.ingestPage({ ...data, after, pageToken });
       } catch (e) {
         if (e instanceof GmailAuthError) {
-          await ingest.markIntegration(createAdminClient(), data.integrationId, { sync_state: "error", sync_error: "Gmail access was revoked or expired. Sign in again to reconnect." });
+          await repo.markIntegration(db(), data.studioId, data.integrationId, { sync_state: "error", sync_error: "Gmail access was revoked or expired. Sign in again to reconnect." });
           throw new NonRetriableError(e.message);
         }
         throw e;
@@ -34,7 +34,7 @@ async function ingestAll(step: Step, data: IntegrationEventData, after: string, 
     result.newThreadIds.forEach((t: string) => threads.add(t));
     processed += result.processed;
     await step.run(`${label}-progress-${page}`, () =>
-      ingest.markIntegration(createAdminClient(), data.integrationId, { checkpoint: { processed, page } }),
+      repo.markIntegration(db(), data.studioId, data.integrationId, { checkpoint: { processed, page } }),
     );
     if (!result.nextPageToken) break;
     pageToken = result.nextPageToken;
@@ -61,9 +61,10 @@ export const backfill = inngest.createFunction(
     const data = event.data as IntegrationEventData;
 
     const after = await step.run("start", async () => {
-      const db = createAdminClient();
-      const studio = await repo.getStudio(db, data.studioId);
-      await ingest.markIntegration(db, data.integrationId, { sync_state: "backfilling", sync_error: null, checkpoint: { processed: 0, page: 0 } });
+      const conn = db();
+      await repo.getIntegrationForStudio(conn, data.studioId, data.integrationId); // the ids must belong together
+      const studio = await repo.getStudio(conn, data.studioId);
+      await repo.markIntegration(conn, data.studioId, data.integrationId, { sync_state: "backfilling", sync_error: null, checkpoint: { processed: 0, page: 0 } });
       return addDays(new Date().toISOString(), -30.4 * studio.backfill_months);
     });
 
@@ -75,7 +76,7 @@ export const backfill = inngest.createFunction(
     await step.run("learn-voice", () => ingest.learnStudioVoice(data.studioId, data.integrationId));
     await step.run("signals", () => ingest.recomputeSignals(data.studioId));
     await step.run("done", () =>
-      ingest.markIntegration(createAdminClient(), data.integrationId, { sync_state: "live", last_synced_at: new Date().toISOString() }),
+      repo.markIntegration(db(), data.studioId, data.integrationId, { sync_state: "live", last_synced_at: new Date().toISOString() }),
     );
   },
 );
@@ -91,12 +92,7 @@ export const sync = inngest.createFunction(
   async ({ event, step }) => {
     const data = event.data as IntegrationEventData;
     const startedAt = await step.run("start", async () => {
-      const { data: row, error } = await createAdminClient()
-        .from("integrations")
-        .select("last_synced_at, sync_state")
-        .eq("id", data.integrationId)
-        .single();
-      if (error) throw new Error(error.message);
+      const row = await repo.getIntegrationForStudio(db(), data.studioId, data.integrationId);
       if (row.sync_state !== "live") return null;
       // Overlap by a day: Gmail search is day-granular and the ledger skips anything seen.
       return { now: new Date().toISOString(), after: addDays(row.last_synced_at ?? new Date().toISOString(), -1) };
@@ -106,9 +102,7 @@ export const sync = inngest.createFunction(
     const threadIds = await ingestAll(step, data, startedAt.after, "sync");
     await extractInBatches(step, data, threadIds, "sync");
     await step.run("signals", () => ingest.recomputeSignals(data.studioId));
-    await step.run("done", () =>
-      ingest.markIntegration(createAdminClient(), data.integrationId, { last_synced_at: startedAt.now }),
-    );
+    await step.run("done", () => repo.markIntegration(db(), data.studioId, data.integrationId, { last_synced_at: startedAt.now }));
     return { threads: threadIds.length };
   },
 );
@@ -117,15 +111,7 @@ export const sync = inngest.createFunction(
 export const syncAll = inngest.createFunction(
   { id: "gmail-sync-all", triggers: [{ cron: "*/10 * * * *" }] },
   async ({ step }) => {
-    const integrations = await step.run("list", async () => {
-      const { data, error } = await createAdminClient()
-        .from("integrations")
-        .select("id, studio_id")
-        .eq("sync_state", "live")
-        .is("revoked_at", null);
-      if (error) throw new Error(error.message);
-      return data;
-    });
+    const integrations = await step.run("list", () => repo.listLiveIntegrations(db()));
     if (integrations.length > 0) {
       await step.sendEvent(
         "fan-out",
@@ -139,11 +125,7 @@ export const syncAll = inngest.createFunction(
 export const dailySignals = inngest.createFunction(
   { id: "signals-daily", triggers: [{ cron: "0 6 * * *" }] },
   async ({ step }) => {
-    const studios = await step.run("list", async () => {
-      const { data, error } = await createAdminClient().from("studios").select("id");
-      if (error) throw new Error(error.message);
-      return data.map((s) => s.id as string);
-    });
+    const studios = await step.run("list", () => repo.listStudioIds(db()));
     for (const id of studios) await step.run(`signals-${id}`, () => ingest.recomputeSignals(id));
   },
 );

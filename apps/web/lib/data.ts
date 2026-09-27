@@ -14,7 +14,7 @@ import {
   type Project,
 } from "@flossamer/core";
 import { isDemo } from "@/lib/env";
-import * as repo from "@/lib/repo";
+import * as repo from "@flossamer/db";
 import { currentStudio } from "@/lib/session";
 
 export interface Connection {
@@ -76,21 +76,20 @@ export async function loadStudio(): Promise<StudioData> {
     repo.listInteractions(db, studioId),
     repo.listProjects(db, studioId),
     repo.listSignals(db, studioId),
-    db.from("integrations").select("account_email, sync_state, sync_error, checkpoint, last_synced_at").eq("studio_id", studioId).maybeSingle(),
+    repo.getIntegration(db, studioId),
   ]);
 
-  const row = integration.data;
   return {
     demo: false,
     now,
     studio,
-    connection: row
+    connection: integration
       ? {
-          accountEmail: row.account_email,
-          syncState: row.sync_state,
-          syncError: row.sync_error,
-          processed: row.checkpoint?.processed ?? 0,
-          lastSyncedAt: row.last_synced_at,
+          accountEmail: integration.account_email,
+          syncState: integration.sync_state,
+          syncError: integration.sync_error,
+          processed: integration.checkpoint?.processed ?? 0,
+          lastSyncedAt: integration.last_synced_at,
         }
       : null,
     people,

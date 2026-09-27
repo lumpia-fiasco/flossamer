@@ -7,16 +7,16 @@ Product spec: [Flossamer PRD v2.1](https://claude.ai/code/artifact/050e6244-83ee
 ## Layout
 
 ```
-apps/web          Next.js 16 app on Vercel: pages, server actions, auth, Inngest functions
+apps/web          Next.js 16 app on Vercel: pages, server actions, Auth.js, Inngest functions
 packages/core     Domain model, business filter, signal detectors, weekly briefing (no I/O)
 packages/agents   Claude-backed steps: mail classification, thread extraction, drafts, voice
 packages/mail     Gmail client and a resumable, idempotent backfill
-supabase/         Postgres schema with row-level security
+packages/db       Postgres schema, migrations and every query, each scoped to one studio
 ```
 
 ## How it works
 
-1. **Sign in with Google.** One consent grants Gmail read and draft access. The refresh token is encrypted (AES-256-GCM) into `integration_secrets`, a table only the server can read.
+1. **Sign in with Google (Auth.js).** One consent grants Gmail read and draft access. The refresh token is encrypted (AES-256-GCM) into `integration_secrets`, which no export or general query touches. The studio id lives in the signed session token, and every query is scoped to it; `packages/db/src/repo.test.ts` checks that one studio can never read or change another's rows.
 2. **Backfill (Inngest).** One step per page of 100 messages. Headers go through the business filter first; personal and automated mail never reaches a model and its body is never fetched. Business mail becomes `interactions` (reference plus a short summary, never the full body).
 3. **Extraction.** Threads active in the last 120 days are read in full, in memory, and Claude extracts only what's stated: inquiry or intro, budget, timeline, deferred intent.
 4. **Signals.** The deterministic detectors in `packages/core` run over the stored history and are reconciled with what's stored. The user's decisions (snooze, done, not relevant) are never overwritten.
@@ -27,25 +27,26 @@ supabase/         Postgres schema with row-level security
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000; sample data until Supabase is configured
+npm run dev        # http://localhost:3000; sample data until DATABASE_URL is set
 npm test
 npm run typecheck
 ```
 
 ## Set up real accounts
 
-**1. Supabase**
-- Create a project, then run `supabase/migrations/20260927000000_init.sql` (SQL editor, or `supabase db push`).
-- Copy the URL, anon key and service role key into `apps/web/.env.local` (see `.env.example`).
+**1. Neon**
+- Create a project (or add Neon from the Vercel Marketplace, which fills in `DATABASE_URL` for you).
+- Run the migration with the direct (non-pooled) connection string: `DATABASE_URL=<direct url> npm run db:migrate`.
+- Put the pooled connection string in `apps/web/.env.local` as `DATABASE_URL`.
 
 **2. Google Cloud**
-- Create an OAuth client (Web application). Authorized redirect URI: `https://<your-project>.supabase.co/auth/v1/callback`.
+- Enable the Gmail API.
+- Create an OAuth client (Web application). Authorized redirect URIs: `http://localhost:3000/api/auth/callback/google` and `https://<your-domain>/api/auth/callback/google`.
 - On the OAuth consent screen, add the scopes `gmail.readonly` and `gmail.compose`, and add each pilot user under Test users (up to 100 while unverified).
-- Enable the Gmail API for the project.
+- Copy the client id and secret into `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`.
 
-**3. Supabase Auth**
-- Auth > Providers > Google: paste the client id and secret.
-- Auth > URL Configuration: add `http://localhost:3000/auth/callback` and your production `/auth/callback` to the redirect allow list.
+**3. Secrets**
+- `AUTH_SECRET`: `npx auth secret`. `TOKEN_ENCRYPTION_KEY`: `openssl rand -base64 32`.
 
 **4. Inngest**
 - Locally: `npx inngest-cli@latest dev` alongside `npm run dev`, with `INNGEST_DEV=1`.
@@ -58,11 +59,11 @@ npm run typecheck
 
 | PRD | Code |
 | --- | --- |
-| CN-01 Gmail connection, token storage | `apps/web/app/auth/callback/route.ts`, `packages/mail/src/gmail.ts` |
+| CN-01 Gmail connection, token storage | `apps/web/auth.ts`, `packages/mail/src/gmail.ts` |
 | EM-01, EM-04 backfill and sync | `apps/web/lib/inngest/functions.ts`, `apps/web/lib/ingest.ts` |
 | EM-02 business filter, runs before any model | `packages/core/src/filter.ts` |
 | EM-03 retroactive exclusions | `apps/web/lib/actions.ts` (`saveStudio`, `excludePerson`) |
-| CN-05, CN-06 people and matching | `apps/web/lib/repo.ts` (`resolvePerson`), People page |
+| CN-05, CN-06 people and matching | `packages/db/src/repo.ts` (`resolvePerson`), People page |
 | LD-02 stalled, LD-03 waiting, RL-02 quiet | `packages/core/src/signals.ts` |
 | AN-01, AN-03, AN-04 Coming up | `packages/core/src/comingUp.ts` |
 | CN-04, LD-01, AN-02 extraction | `packages/agents/src/conversation.ts` |

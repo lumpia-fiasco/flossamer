@@ -1,3 +1,4 @@
+import { listActions } from "@flossamer/db";
 import Link from "next/link";
 import { isDemo } from "@/lib/env";
 import { currentStudio } from "@/lib/session";
@@ -12,16 +13,10 @@ const DESCRIBE: Record<string, string> = {
 
 /** TR-01: every agent suggestion and user decision, newest first. */
 export default async function Activity() {
-  let rows: { id: string; agent: string; trigger: string; proposed: Record<string, unknown>; approval: string; at: string }[] = [];
+  let rows: Awaited<ReturnType<typeof listActions>> = [];
   if (!isDemo) {
     const { db, studioId } = await currentStudio();
-    const { data } = await db
-      .from("agent_actions")
-      .select("id, agent, trigger, proposed, approval, at")
-      .eq("studio_id", studioId)
-      .order("at", { ascending: false })
-      .limit(200);
-    rows = data ?? [];
+    rows = await listActions(db, studioId);
   }
 
   return (
