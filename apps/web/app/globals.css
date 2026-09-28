@@ -41,3 +41,19 @@ body {
   background: var(--paper);
   color: var(--ink);
 }
+
+/* The findings report prints as a clean handout: light colors, no chrome. */
+@media print {
+  :root {
+    --paper: #ffffff;
+    --surface: #ffffff;
+    --ink: #1c1b19;
+    --muted: #5c5850;
+    --rule: #dcd6cb;
+    --accent: #a4481f;
+    --accent-soft: #f8efe9;
+  }
+  main {
+    padding: 0 !important;
+  }
+}

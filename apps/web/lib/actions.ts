@@ -161,6 +161,7 @@ export async function createProjectFromSignal(signalId: string): Promise<ActionR
     threadIds: evidence.map((e) => e.threadId),
   });
   await repo.setSignalStatus(db, studioId, signalId, "done");
+  await repo.logAction(db, studioId, { agent: "user", trigger: "create_project", evidence: signal.evidence, proposed: { signalId }, approval: "approved" });
   refresh();
   return { ok: true };
 }

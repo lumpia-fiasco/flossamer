@@ -16,7 +16,7 @@ export function Nav() {
   return (
     <nav
       aria-label="Main"
-      className="border-b border-rule px-4 py-3 md:sticky md:top-0 md:h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r md:px-6 md:py-10"
+      className="border-b border-rule px-4 py-3 print:hidden md:sticky md:top-0 md:h-screen md:w-56 md:shrink-0 md:border-b-0 md:border-r md:px-6 md:py-10"
     >
       <p className="font-serif text-xl tracking-tight md:mb-10">flossamer</p>
       <ul className="-mx-2 mt-2 flex gap-1 overflow-x-auto [scrollbar-width:none] md:mt-0 md:flex-col md:gap-0.5">

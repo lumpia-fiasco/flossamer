@@ -161,3 +161,27 @@ describe("studio isolation", () => {
     expect(await repo.listPeople(db, b)).toHaveLength(1);
   });
 });
+
+describe("findings report data", () => {
+  it("counts mail by class, per studio", async () => {
+    await repo.markSeen(db, a, "m1", "business");
+    await repo.markSeen(db, a, "m2", "personal");
+    await repo.markSeen(db, a, "m3", "personal");
+    await repo.markSeen(db, b, "m4", "automated");
+    expect(await repo.mailClassCounts(db, a)).toEqual({ business: 1, personal: 2, automated: 0 });
+  });
+
+  it("records only the first report view, and collects acting events", async () => {
+    await repo.recordReportView(db, a);
+    const first = (await repo.gateZeroEvents(db, a)).firstViewedAt;
+    await repo.recordReportView(db, a);
+    expect((await repo.gateZeroEvents(db, a)).firstViewedAt).toBe(first);
+
+    await repo.logAction(db, a, { agent: "user", trigger: "snooze", proposed: {}, approval: "approved" });
+    await repo.logAction(db, a, { agent: "draft_writer", trigger: "draft:reconnect", proposed: {}, approval: "pending" });
+    await repo.logAction(db, a, { agent: "user", trigger: "create_project", proposed: {}, approval: "approved" });
+    const events = await repo.gateZeroEvents(db, a);
+    expect(events.actionsAt).toHaveLength(2); // snoozing isn't acting
+    expect((await repo.gateZeroEvents(db, b)).firstViewedAt).toBeNull();
+  });
+});

@@ -1,4 +1,5 @@
 import type { OpportunitySignal } from "@flossamer/core";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SignalCard } from "@/components/SignalCard";
 import { SyncBanner } from "@/components/SyncBanner";
@@ -29,6 +30,11 @@ export default async function ThisWeek() {
     <>
       <p className="text-sm text-muted">Week of {formatDate(b.weekOf)}</p>
       <h1 className="mt-1 font-serif text-4xl tracking-tight">This week in your studio</h1>
+      <p className="mt-2 text-sm">
+        <Link href="/report" className="text-muted underline hover:text-ink">
+          See everything Flossamer found in your mail
+        </Link>
+      </p>
       <SyncBanner connection={data.connection} />
 
       {b.isQuiet ? (

@@ -4,6 +4,7 @@ export * from "./filter";
 export * from "./signals";
 export * from "./comingUp";
 export * from "./briefing";
+export * from "./findings";
 export * from "./fixtures";
 
 import { detectComingUp } from "./comingUp";

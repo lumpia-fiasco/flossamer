@@ -675,3 +675,41 @@ export async function exportStudio(db: Db, studioId: string) {
     activity: await q("select * from agent_actions where studio_id = $1 order by at"),
   };
 }
+
+// --- Findings report and Gate 0 ------------------------------------------------------
+
+/** How much mail was read as business, and how much was set aside unread. */
+export async function mailClassCounts(db: Db, studioId: string): Promise<{ business: number; personal: number; automated: number }> {
+  const rows = await db.query<{ mail_class: string; n: unknown }>(
+    "select mail_class, count(*) as n from seen_messages where studio_id = $1 group by mail_class",
+    [studioId],
+  );
+  const get = (c: string) => Number(rows.find((r) => r.mail_class === c)?.n ?? 0);
+  return { business: get("business"), personal: get("personal"), automated: get("automated") };
+}
+
+/** Actions that count as acting on a finding: a draft written, a project started, an item marked done. */
+const ACTED_TRIGGERS = ["create_project", "done"];
+
+export async function gateZeroEvents(db: Db, studioId: string): Promise<{ firstViewedAt: string | null; actionsAt: string[] }> {
+  const [viewed] = await db.query<{ at: unknown }>(
+    "select min(at) as at from agent_actions where studio_id = $1 and trigger = 'report_viewed'",
+    [studioId],
+  );
+  const acted = await db.query<{ at: unknown }>(
+    `select at from agent_actions where studio_id = $1
+     and (agent = 'draft_writer' or (agent = 'user' and trigger = any($2::text[])))`,
+    [studioId, ACTED_TRIGGERS],
+  );
+  return { firstViewedAt: isoOrNull(viewed?.at), actionsAt: acted.map((r) => iso(r.at)) };
+}
+
+/** Record the first time the report is opened; later views don't matter for Gate 0. */
+export async function recordReportView(db: Db, studioId: string) {
+  await db.query(
+    `insert into agent_actions (studio_id, agent, trigger, proposed, approval)
+     select $1, 'user', 'report_viewed', '{}'::jsonb, 'approved'
+     where not exists (select 1 from agent_actions where studio_id = $1 and trigger = 'report_viewed')`,
+    [studioId],
+  );
+}

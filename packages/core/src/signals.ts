@@ -1,4 +1,6 @@
 import { daysBetween, median } from "./dates";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 import type { Interaction, OpportunitySignal, Person } from "./types";
 
 /**
@@ -65,7 +67,7 @@ export function detectThreadSignals(
             type: "stalled",
             personId: last.personId,
             evidence: [last.id],
-            reason: `No reply in ${Math.floor(idleDays)} days to your last message.`,
+            reason: `No reply in ${plural(Math.floor(idleDays), "day")} to your last message.`,
             confidence: 0.9,
           },
           now,
@@ -81,7 +83,7 @@ export function detectThreadSignals(
             type: "waiting",
             personId: last.personId,
             evidence: [last.id],
-            reason: `They wrote ${Math.floor(idleDays)} days ago and haven't heard back.`,
+            reason: Math.floor(idleDays) === 0 ? "They wrote today and haven't heard back." : `They wrote ${plural(Math.floor(idleDays), "day")} ago and haven't heard back.`,
             confidence: 0.8,
           },
           now,
@@ -131,7 +133,7 @@ export function detectQuietRelationships(
           type: "reconnect",
           personId: person.id,
           evidence: [last.id],
-          reason: `Last in touch ${Math.round(quietFor / 30)} months ago: ${last.summary}`,
+          reason: `Last in touch ${plural(Math.round(quietFor / 30), "month")} ago: ${last.summary}`,
           confidence: typical === null ? 0.6 : 0.75,
         },
         now,

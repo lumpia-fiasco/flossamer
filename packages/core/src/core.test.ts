@@ -72,6 +72,12 @@ describe("business filter", () => {
 describe("thread signals", () => {
   const signals = detectThreadSignals(sampleInteractions, { now: SAMPLE_NOW });
 
+  it("writes reasons in plain, correctly pluralized English", () => {
+    const now = "2026-09-26T16:00:00.000Z"; // Sam wrote a day earlier
+    const sam = detectThreadSignals(sampleInteractions, { now }).find((s) => s.personId === "sam");
+    expect(sam?.reason).toBe("They wrote 1 day ago and haven't heard back.");
+  });
+
   it("flags a proposal with no reply after 7 days as stalled", () => {
     expect(signals.filter((s) => s.type === "stalled").map((s) => s.personId)).toEqual(["priya"]);
   });

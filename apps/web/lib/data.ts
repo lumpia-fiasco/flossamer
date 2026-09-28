@@ -1,6 +1,9 @@
 import {
   SAMPLE_NOW,
   composeBriefing,
+  composeFindings,
+  gateZeroOutcome,
+  type FindingsReport,
   detectAll,
   groupByThread,
   sampleAgentSignals,
@@ -126,3 +129,26 @@ export function lookups(data: StudioData) {
 
 export const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+export interface ReportData {
+  data: StudioData;
+  report: FindingsReport;
+  gateZero: ReturnType<typeof gateZeroOutcome>;
+}
+
+/** The findings report, and whether this studio has passed Gate 0. Opening it counts as viewing it. */
+export async function loadReport(): Promise<ReportData> {
+  const data = await loadStudio();
+  if (data.demo) {
+    const report = composeFindings({ ...data, mail: { business: data.interactions.length, personal: 840, automated: 3100 } });
+    return { data, report, gateZero: gateZeroOutcome({ firstViewedAt: null, actionsAt: [], now: data.now }) };
+  }
+  const { db, studioId } = await currentStudio();
+  await repo.recordReportView(db, studioId);
+  const [mail, events] = await Promise.all([repo.mailClassCounts(db, studioId), repo.gateZeroEvents(db, studioId)]);
+  return {
+    data,
+    report: composeFindings({ ...data, mail }),
+    gateZero: gateZeroOutcome({ ...events, now: data.now }),
+  };
+}
