@@ -50,6 +50,7 @@ export default async function ThisWeek() {
           <Section data={data} title="Follow up" note="You sent something and haven't had a reply." signals={b.followUps} />
           <Section data={data} title="Coming up" note="Moments to reach out before they arrive." signals={b.comingUp} />
           <Section data={data} title="Reconnect" note="Good relationships that have gone quiet." signals={b.reconnects} />
+          <Section data={data} title="Worth writing about" note="Trends in what you read that match what you offer." signals={b.ideas} />
         </>
       )}
     </>

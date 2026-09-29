@@ -185,3 +185,53 @@ describe("findings report data", () => {
     expect((await repo.gateZeroEvents(db, b)).firstViewedAt).toBeNull();
   });
 });
+
+describe("industry radar", () => {
+  it("keeps sources and posts per studio", async () => {
+    const src = await repo.addSource(db, a, { url: "https://example.com/feed", title: "Example", origin: "user", enabled: true });
+    await repo.addSource(db, b, { url: "https://example.com/feed", title: "Example", origin: "user", enabled: true });
+
+    const fresh = await repo.insertArticles(db, a, src, [{ url: "https://example.com/p1", title: "Post", publishedAt: "2026-09-20T00:00:00Z" }]);
+    expect(fresh).toHaveLength(1);
+    expect(await repo.insertArticles(db, a, src, [{ url: "https://example.com/p1", title: "Post", publishedAt: null }])).toEqual([]);
+
+    // B can't write posts into A's source, or switch it off.
+    expect(await repo.insertArticles(db, b, src, [{ url: "https://example.com/p2", title: "Other", publishedAt: null }])).toEqual([]);
+    await repo.setSourceEnabled(db, b, src, false);
+    expect((await repo.listSources(db, a))[0]!.enabled).toBe(true);
+    await repo.removeSource(db, b, src);
+    expect(await repo.listSources(db, a)).toHaveLength(1);
+  });
+
+  it("never switches a source off by re-adding it", async () => {
+    const src = await repo.addSource(db, a, { url: "https://x.substack.com/feed", title: "X", origin: "user", enabled: true });
+    await repo.addSource(db, a, { url: "https://x.substack.com/feed", title: "X", origin: "newsletter", enabled: false });
+    expect((await repo.listSources(db, a)).find((s) => s.id === src)!.enabled).toBe(true);
+  });
+
+  it("only offers the radar studios with a source switched on", async () => {
+    await repo.addSource(db, a, { url: "https://example.com/feed", title: "Example", origin: "user", enabled: true });
+    await repo.addSource(db, b, { url: "https://example.com/feed", title: "Example", origin: "newsletter", enabled: false });
+    expect(await repo.studiosForRadar(db)).toEqual([a]);
+  });
+
+  it("gives the analysis only confirmed clients, with facts from the user's records", async () => {
+    const maya = await repo.resolvePerson(db, a, "maya@northwind.com");
+    await repo.resolvePerson(db, a, "stranger@unknown.com");
+    await repo.setRelationship(db, a, maya, "past_client");
+    await repo.createProject(db, a, { title: "Checkout redesign", stage: "Wrapped", originSignalId: null, personId: maya, threadIds: [] });
+    const facts = await repo.clientFacts(db, a);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]!.facts).toEqual(expect.arrayContaining(["Relationship: past client", "Email domain: northwind.com", "Project together: Checkout redesign"]));
+    expect(await repo.clientFacts(db, b)).toEqual([]);
+  });
+
+  it("stores the source link on radar signals and counts them for the weekly cap", async () => {
+    await repo.upsertSignals(db, a, [
+      signal("idea:1", null, { type: "idea", link: { url: "https://example.com/p1", title: "Post", source: "Example" } }),
+    ]);
+    expect((await repo.getSignal(db, a, "idea:1"))!.link).toEqual({ url: "https://example.com/p1", title: "Post", source: "Example" });
+    expect(await repo.radarSignalCount(db, a, "2000-01-01")).toBe(1);
+    expect(await repo.radarSignalCount(db, b, "2000-01-01")).toBe(0);
+  });
+});

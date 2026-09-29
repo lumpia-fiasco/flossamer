@@ -18,7 +18,8 @@
     "next-auth": "^5.0.0-beta.32",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "@flossamer/db": "*"
+    "@flossamer/db": "*",
+    "@flossamer/radar": "*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

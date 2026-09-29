@@ -7,6 +7,7 @@ import {
   detectAll,
   groupByThread,
   sampleAgentSignals,
+  sampleRadarSignals,
   sampleInteractions,
   samplePeople,
   sampleProjects,
@@ -31,13 +32,17 @@ export interface Connection {
 export interface StudioData {
   demo: boolean;
   now: string;
-  studio: Pick<repo.StudioRow, "display_name" | "profile" | "voice" | "exclusions" | "stages" | "backfill_months" | "onboarded_at">;
+  studio: Pick<
+    repo.StudioRow,
+    "display_name" | "profile" | "voice" | "exclusions" | "stages" | "backfill_months" | "onboarded_at" | "radar_enabled" | "radar_newsletters"
+  >;
   connection: Connection | null;
   people: Person[];
   interactions: Interaction[];
   projects: Project[];
   signals: OpportunitySignal[];
   briefing: Briefing;
+  sources: repo.SourceRow[];
 }
 
 const DEMO_STUDIO: StudioData["studio"] = {
@@ -52,12 +57,23 @@ const DEMO_STUDIO: StudioData["studio"] = {
   stages: ["Conversation", "Proposal out", "Booked", "In progress", "Wrapped"],
   backfill_months: 12,
   onboarded_at: SAMPLE_NOW,
+  radar_enabled: true,
+  radar_newsletters: false,
 };
+
+const sampleSources: repo.SourceRow[] = [
+  { id: "src-1", url: "https://www.nngroup.com/feed/rss/", title: "Nielsen Norman Group", origin: "suggested", enabled: true, last_fetched_at: SAMPLE_NOW, last_error: null },
+  { id: "src-2", url: "https://www.lennysnewsletter.com/feed", title: "Lenny's Newsletter", origin: "user", enabled: true, last_fetched_at: SAMPLE_NOW, last_error: null },
+];
 
 /** Everything a page needs about the studio: sample data in demo mode, the database otherwise. */
 export async function loadStudio(): Promise<StudioData> {
   if (isDemo) {
-    const signals = [...detectAll({ now: SAMPLE_NOW, people: samplePeople, interactions: sampleInteractions, projects: sampleProjects }), ...sampleAgentSignals];
+    const signals = [
+      ...detectAll({ now: SAMPLE_NOW, people: samplePeople, interactions: sampleInteractions, projects: sampleProjects }),
+      ...sampleAgentSignals,
+      ...sampleRadarSignals,
+    ];
     return {
       demo: true,
       now: SAMPLE_NOW,
@@ -68,18 +84,20 @@ export async function loadStudio(): Promise<StudioData> {
       projects: sampleProjects,
       signals,
       briefing: composeBriefing(signals, SAMPLE_NOW),
+      sources: sampleSources,
     };
   }
 
   const { db, studioId } = await currentStudio();
   const now = new Date().toISOString();
-  const [studio, people, interactions, projects, signals, integration] = await Promise.all([
+  const [studio, people, interactions, projects, signals, integration, sources] = await Promise.all([
     repo.getStudio(db, studioId),
     repo.listPeople(db, studioId),
     repo.listInteractions(db, studioId),
     repo.listProjects(db, studioId),
     repo.listSignals(db, studioId),
     repo.getIntegration(db, studioId),
+    repo.listSources(db, studioId),
   ]);
 
   return {
@@ -100,6 +118,7 @@ export async function loadStudio(): Promise<StudioData> {
     projects,
     signals,
     briefing: composeBriefing(signals, now),
+    sources,
   };
 }
 

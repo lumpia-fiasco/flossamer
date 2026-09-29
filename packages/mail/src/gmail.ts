@@ -7,7 +7,7 @@ import type { MailSource, MessageRef, SourceHeaders } from "./index";
  */
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
-const METADATA_HEADERS = ["From", "To", "Subject", "Date", "List-Unsubscribe", "Precedence", "Auto-Submitted", "Message-ID", "References"];
+const METADATA_HEADERS = ["From", "To", "Subject", "Date", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted", "Message-ID", "References"];
 
 export class GmailAuthError extends Error {}
 
@@ -221,6 +221,8 @@ function toSourceHeaders(m: GmailMessage): SourceHeaders {
     snippet: decodeEntities(m.snippet),
     date: new Date(Number(m.internalDate)).toISOString(),
     messageId: header(m, "Message-ID"),
+    listId: header(m, "List-Id"),
+    listUnsubscribeValue: header(m, "List-Unsubscribe"),
   };
 }
 

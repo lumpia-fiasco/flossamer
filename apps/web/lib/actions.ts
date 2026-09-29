@@ -10,6 +10,7 @@ import { decrypt } from "@/lib/crypto";
 import { isDemo } from "@/lib/env";
 import { EVENTS, inngest } from "@/lib/inngest/client";
 import { gmailFor } from "@/lib/ingest";
+import { STARTER_SOURCES, fetchFeed } from "@flossamer/radar";
 import { currentStudio } from "@/lib/session";
 
 export type ActionResult = { ok: true; url?: string } | { ok: false; message: string };
@@ -25,6 +26,7 @@ const PURPOSE: Record<OpportunitySignal["type"], DraftPurpose> = {
   stalled: "follow_up",
   reconnect: "reconnect",
   coming_up: "coming_up",
+  idea: "coming_up", // ideas have no recipient; the card offers no draft
 };
 
 const refresh = () => revalidatePath("/", "layout");
@@ -250,4 +252,77 @@ export async function deleteEverything(): Promise<void> {
 export async function signOut(): Promise<void> {
   if (isDemo) redirect("/");
   await authSignOut({ redirectTo: "/login" });
+}
+
+// --- Industry radar (IR-01, IR-02) ---------------------------------------------------
+
+async function requestRadar(studioId: string) {
+  await inngest.send({ name: EVENTS.radarRequested, data: { studioId } });
+}
+
+/** Follow any public RSS or Atom feed. The feed is fetched once to check it works. */
+export async function followFeed(form: FormData): Promise<ActionResult> {
+  if (isDemo) return DEMO;
+  let url = String(form.get("url") ?? "").trim();
+  if (!url) return { ok: false, message: "Paste a feed or publication address." };
+  if (!/^https?:\/\//.test(url)) url = `https://${url}`;
+  // A bare Substack address becomes its feed.
+  if (/\.substack\.com\/?$/i.test(url)) url = url.replace(/\/?$/, "/feed");
+
+  let title: string;
+  try {
+    title = (await fetchFeed(url)).title || new URL(url).hostname;
+  } catch {
+    return { ok: false, message: "That address didn't return a feed. Try the publication's RSS link, or add /feed to a Substack address." };
+  }
+  const { db, studioId } = await currentStudio();
+  await repo.addSource(db, studioId, { url, title, origin: "user", enabled: true });
+  await requestRadar(studioId);
+  refresh();
+  return { ok: true };
+}
+
+export async function followStarter(url: string): Promise<ActionResult> {
+  if (isDemo) return DEMO;
+  const starter = STARTER_SOURCES.find((s) => s.url === url);
+  if (!starter) return { ok: false, message: "Unknown source." };
+  const { db, studioId } = await currentStudio();
+  await repo.addSource(db, studioId, { url: starter.url, title: starter.title, origin: "suggested", enabled: true });
+  await requestRadar(studioId);
+  refresh();
+  return { ok: true };
+}
+
+export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<ActionResult> {
+  if (isDemo) return DEMO;
+  const { db, studioId } = await currentStudio();
+  await repo.setSourceEnabled(db, studioId, sourceId, enabled);
+  if (enabled) await requestRadar(studioId);
+  refresh();
+  return { ok: true };
+}
+
+export async function removeSource(sourceId: string): Promise<ActionResult> {
+  if (isDemo) return DEMO;
+  const { db, studioId } = await currentStudio();
+  await repo.removeSource(db, studioId, sourceId);
+  refresh();
+  return { ok: true };
+}
+
+export async function saveRadarOptions(form: FormData): Promise<void> {
+  if (isDemo) return;
+  const { db, studioId } = await currentStudio();
+  await repo.updateStudio(db, studioId, {
+    radar_enabled: form.get("radar_enabled") === "on",
+    radar_newsletters: form.get("radar_newsletters") === "on",
+  });
+  refresh();
+}
+
+export async function checkRadarNow(): Promise<ActionResult> {
+  if (isDemo) return DEMO;
+  const { studioId } = await currentStudio();
+  await requestRadar(studioId);
+  return { ok: true };
 }

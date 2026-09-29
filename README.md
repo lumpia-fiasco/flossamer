@@ -12,6 +12,7 @@ packages/core     Domain model, business filter, signal detectors, weekly briefi
 packages/agents   Claude-backed steps: mail classification, thread extraction, drafts, voice
 packages/mail     Gmail client and a resumable, idempotent backfill
 packages/db       Postgres schema, migrations and every query, each scoped to one studio
+packages/radar    Industry radar: RSS/Atom reading, starter sources, newsletter detection from headers
 ```
 
 ## How it works
@@ -22,6 +23,7 @@ packages/db       Postgres schema, migrations and every query, each scoped to on
 4. **Signals.** The deterministic detectors in `packages/core` run over the stored history and are reconciled with what's stored. The user's decisions (snooze, done, not relevant) are never overwritten.
 5. **Sync.** Every 10 minutes for live integrations, plus a daily pass so time-based signals move along.
 6. **Drafts.** "Open draft" writes a grounded draft in the user's voice and saves it to Gmail Drafts. There is no send path.
+7. **Industry radar.** Daily, Flossamer reads new public posts from the publications a user follows. A cheap triage pass picks a few, and those are read against the user's services and the facts it holds about their clients. Only client matches (Coming up) and service matches (Worth writing about) surface, at most 3 a week, each linked to its source. Stored: link, title and one line; never the article.
 
 ## Run it
 
@@ -36,7 +38,7 @@ npm run typecheck
 
 **1. Neon**
 - Create a project (or add Neon from the Vercel Marketplace, which fills in `DATABASE_URL` for you).
-- Run the migration with the direct (non-pooled) connection string: `DATABASE_URL=<direct url> npm run db:migrate`.
+- Run the migrations with the direct (non-pooled) connection string: `DATABASE_URL=<direct url> npm run db:migrate`. Run it again after pulling changes that add a file to `packages/db/migrations`, before deploying.
 - Put the pooled connection string in `apps/web/.env.local` as `DATABASE_URL`.
 
 **2. Google Cloud**
@@ -70,6 +72,8 @@ npm run typecheck
 | VC-01 to VC-03 voice and drafts | `packages/agents/src/drafts.ts`, `openDraft` in `apps/web/lib/actions.ts` |
 | TD-01 to TD-05 This week | `packages/core/src/briefing.ts`, `apps/web/app/(app)/page.tsx` |
 | WK-01 to WK-04, WK-11 Work | `apps/web/app/(app)/work/page.tsx` |
+| IR-01 to IR-07 industry radar | `packages/radar`, `packages/agents/src/radar.ts`, `apps/web/lib/radar.ts` |
+| Gate 0 findings report | `packages/core/src/findings.ts`, `apps/web/app/(app)/report/page.tsx` |
 | TR-01 to TR-04 activity log, export, delete | `apps/web/app/(app)/studio/`, `apps/web/app/api/export/route.ts` |
 
 ## Not in v1

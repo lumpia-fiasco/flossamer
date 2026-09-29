@@ -38,9 +38,12 @@ export interface StudioRow {
   backfill_months: number;
   stages: string[];
   onboarded_at: string | null;
+  radar_enabled: boolean;
+  radar_newsletters: boolean;
 }
 
-const STUDIO_COLUMNS = "id, display_name, owner_email, profile, voice, exclusions, backfill_months, stages, onboarded_at";
+const STUDIO_COLUMNS =
+  "id, display_name, owner_email, profile, voice, exclusions, backfill_months, stages, onboarded_at, radar_enabled, radar_newsletters";
 
 const toStudio = (r: StudioRow): StudioRow => ({ ...r, onboarded_at: isoOrNull(r.onboarded_at) });
 
@@ -68,15 +71,25 @@ export async function listStudioIds(db: Db): Promise<string[]> {
 export async function updateStudio(
   db: Db,
   studioId: string,
-  patch: Partial<{ display_name: string | null; profile: StudioRow["profile"]; exclusions: Exclusions; voice: VoiceProfile; onboarded: boolean }>,
+  patch: Partial<{
+    display_name: string | null;
+    profile: StudioRow["profile"];
+    exclusions: Exclusions;
+    voice: VoiceProfile;
+    onboarded: boolean;
+    radar_enabled: boolean;
+    radar_newsletters: boolean;
+  }>,
 ) {
   await db.query(
     `update studios set
-       display_name = case when $2 then $3 else display_name end,
-       profile      = coalesce($4::jsonb, profile),
-       exclusions   = coalesce($5::jsonb, exclusions),
-       voice        = coalesce($6::jsonb, voice),
-       onboarded_at = case when $7 then coalesce(onboarded_at, now()) else onboarded_at end
+       display_name      = case when $2 then $3 else display_name end,
+       profile           = coalesce($4::jsonb, profile),
+       exclusions        = coalesce($5::jsonb, exclusions),
+       voice             = coalesce($6::jsonb, voice),
+       onboarded_at      = case when $7 then coalesce(onboarded_at, now()) else onboarded_at end,
+       radar_enabled     = coalesce($8, radar_enabled),
+       radar_newsletters = coalesce($9, radar_newsletters)
      where id = $1`,
     [
       studioId,
@@ -86,6 +99,8 @@ export async function updateStudio(
       patch.exclusions ? json(patch.exclusions) : null,
       patch.voice ? json(patch.voice) : null,
       patch.onboarded ?? false,
+      patch.radar_enabled ?? null,
+      patch.radar_newsletters ?? null,
     ],
   );
 }
@@ -570,10 +585,11 @@ interface SignalRow {
   reach_out_by: string | null;
   status: OpportunitySignal["status"];
   created_at: unknown;
+  link: OpportunitySignal["link"];
 }
 
 const SIGNAL_COLUMNS = `id, type, coming_up_kind, person_id, evidence, reason, confidence,
-  to_char(window_opens, 'YYYY-MM-DD') as window_opens, to_char(reach_out_by, 'YYYY-MM-DD') as reach_out_by, status, created_at`;
+  to_char(window_opens, 'YYYY-MM-DD') as window_opens, to_char(reach_out_by, 'YYYY-MM-DD') as reach_out_by, status, created_at, link`;
 
 const toSignal = (r: SignalRow): OpportunitySignal => ({
   id: r.id,
@@ -587,6 +603,7 @@ const toSignal = (r: SignalRow): OpportunitySignal => ({
   reachOutBy: r.reach_out_by,
   status: r.status,
   createdAt: iso(r.created_at),
+  link: r.link ?? null,
 });
 
 export async function listSignals(db: Db, studioId: string): Promise<OpportunitySignal[]> {
@@ -602,12 +619,12 @@ export async function getSignal(db: Db, studioId: string, signalId: string): Pro
 export async function upsertSignals(db: Db, studioId: string, signals: OpportunitySignal[]) {
   for (const s of signals) {
     await db.query(
-      `insert into signals (studio_id, id, type, coming_up_kind, person_id, evidence, reason, confidence, window_opens, reach_out_by)
-       values ($1, $2, $3, $4, (select id from people where studio_id = $1 and id = $5), $6::text[], $7, $8, $9::date, $10::date)
+      `insert into signals (studio_id, id, type, coming_up_kind, person_id, evidence, reason, confidence, window_opens, reach_out_by, link)
+       values ($1, $2, $3, $4, (select id from people where studio_id = $1 and id = $5), $6::text[], $7, $8, $9::date, $10::date, $11::jsonb)
        on conflict (studio_id, id) do update set
          evidence = excluded.evidence, reason = excluded.reason, confidence = excluded.confidence,
-         window_opens = excluded.window_opens, reach_out_by = excluded.reach_out_by`,
-      [studioId, s.id, s.type, s.comingUpKind, s.personId, s.evidence, s.reason, s.confidence, s.windowOpens, s.reachOutBy],
+         window_opens = excluded.window_opens, reach_out_by = excluded.reach_out_by, link = excluded.link`,
+      [studioId, s.id, s.type, s.comingUpKind, s.personId, s.evidence, s.reason, s.confidence, s.windowOpens, s.reachOutBy, s.link ? json(s.link) : null],
     );
   }
 }
@@ -673,6 +690,8 @@ export async function exportStudio(db: Db, studioId: string) {
     projects: await q("select * from projects where studio_id = $1"),
     signals: await q("select * from signals where studio_id = $1"),
     activity: await q("select * from agent_actions where studio_id = $1 order by at"),
+    sources: await q("select id, url, title, origin, enabled, created_at from sources where studio_id = $1"),
+    articles: await q("select url, title, published_at, summary, triage from articles where studio_id = $1 order by created_at"),
   };
 }
 
@@ -712,4 +731,120 @@ export async function recordReportView(db: Db, studioId: string) {
      where not exists (select 1 from agent_actions where studio_id = $1 and trigger = 'report_viewed')`,
     [studioId],
   );
+}
+
+// --- Industry radar (IR-01 to IR-07) ---------------------------------------------------
+
+export interface SourceRow {
+  id: string;
+  url: string;
+  title: string;
+  origin: "suggested" | "newsletter" | "user";
+  enabled: boolean;
+  last_fetched_at: string | null;
+  last_error: string | null;
+}
+
+export async function listSources(db: Db, studioId: string): Promise<SourceRow[]> {
+  const rows = await db.query<SourceRow>(
+    "select id, url, title, origin, enabled, last_fetched_at, last_error from sources where studio_id = $1 order by enabled desc, title",
+    [studioId],
+  );
+  return rows.map((r) => ({ ...r, last_fetched_at: isoOrNull(r.last_fetched_at) }));
+}
+
+/** Add a source. Re-adding an existing URL can switch it on, never off. */
+export async function addSource(db: Db, studioId: string, s: { url: string; title: string; origin: SourceRow["origin"]; enabled: boolean }) {
+  const [row] = await db.query<{ id: string }>(
+    `insert into sources (studio_id, url, title, origin, enabled) values ($1, $2, $3, $4, $5)
+     on conflict (studio_id, url) do update set enabled = sources.enabled or excluded.enabled
+     returning id`,
+    [studioId, s.url, s.title, s.origin, s.enabled],
+  );
+  return row!.id;
+}
+
+export async function setSourceEnabled(db: Db, studioId: string, sourceId: string, enabled: boolean) {
+  await db.query("update sources set enabled = $3 where studio_id = $1 and id = $2", [studioId, sourceId, enabled]);
+}
+
+export async function removeSource(db: Db, studioId: string, sourceId: string) {
+  await db.query("delete from sources where studio_id = $1 and id = $2", [studioId, sourceId]);
+}
+
+export async function markSourceFetched(db: Db, studioId: string, sourceId: string, error: string | null) {
+  await db.query(
+    "update sources set last_fetched_at = case when $3::text is null then now() else last_fetched_at end, last_error = $3 where studio_id = $1 and id = $2",
+    [studioId, sourceId, error],
+  );
+}
+
+export async function studiosForRadar(db: Db): Promise<string[]> {
+  const rows = await db.query<{ id: string }>(
+    `select s.id from studios s where s.radar_enabled
+     and exists (select 1 from sources src where src.studio_id = s.id and src.enabled)`,
+  );
+  return rows.map((r) => r.id);
+}
+
+/** Record posts; returns only the ones not seen before, with the id each was stored under. */
+export async function insertArticles(
+  db: Db,
+  studioId: string,
+  sourceId: string,
+  items: { url: string; title: string; publishedAt: string | null }[],
+): Promise<{ id: string; url: string }[]> {
+  const fresh: { id: string; url: string }[] = [];
+  for (const item of items) {
+    const [row] = await db.query<{ id: string }>(
+      `insert into articles (studio_id, source_id, url, title, published_at)
+       select $1, id, $3, $4, $5::timestamptz from sources where studio_id = $1 and id = $2
+       on conflict (studio_id, url) do nothing returning id`,
+      [studioId, sourceId, item.url, item.title, item.publishedAt],
+    );
+    if (row) fresh.push({ id: row.id, url: item.url });
+  }
+  return fresh;
+}
+
+export async function setArticleTriage(db: Db, studioId: string, articleId: string, triage: "skipped" | "picked" | "analyzed", summary: string | null = null) {
+  await db.query("update articles set triage = $3, summary = coalesce($4, summary) where studio_id = $1 and id = $2", [studioId, articleId, triage, summary]);
+}
+
+/** IR-07: radar items created since a date, to keep them to a few a week. */
+export async function radarSignalCount(db: Db, studioId: string, since: string): Promise<number> {
+  const [row] = await db.query<{ n: unknown }>(
+    `select count(*) as n from signals where studio_id = $1 and created_at >= $2
+     and (type = 'idea' or coming_up_kind = 'industry_trend')`,
+    [studioId, since],
+  );
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * What Flossamer knows about each confirmed client, collaborator or referrer, from
+ * the user's own records only: email domains, project titles, recent subjects.
+ */
+export async function clientFacts(db: Db, studioId: string): Promise<{ personId: string; name: string; facts: string[] }[]> {
+  const rows = await db.query<{ id: string; name: string; relationship: string; domains: string[] | null; projects: string[] | null; subjects: string[] | null }>(
+    `select p.id, p.name, p.relationship->>'value' as relationship,
+       (select array_agg(distinct split_part(e.email, '@', 2)) from person_emails e where e.person_id = p.id) as domains,
+       (select array_agg(pr.title) from project_people pp join projects pr on pr.id = pp.project_id where pp.person_id = p.id) as projects,
+       (select array_agg(subject) from (select i.subject from interactions i where i.studio_id = $1 and i.person_id = p.id and i.subject <> ''
+                                      order by i.at desc limit 3) recent) as subjects
+     from people p
+     where p.studio_id = $1 and p.confirmed and p.relationship->>'value' in ('client','past_client','collaborator','referrer')
+     order by p.name limit 60`,
+    [studioId],
+  );
+  return rows.map((r) => ({
+    personId: r.id,
+    name: r.name,
+    facts: [
+      `Relationship: ${r.relationship.replace("_", " ")}`,
+      ...(r.domains ?? []).map((d) => `Email domain: ${d}`),
+      ...(r.projects ?? []).map((t) => `Project together: ${t}`),
+      ...(r.subjects ?? []).map((t) => `Recent email subject: ${t}`),
+    ],
+  }));
 }

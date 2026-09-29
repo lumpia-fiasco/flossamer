@@ -8,6 +8,7 @@ export const EVENTS = {
   syncRequested: "gmail/sync.requested",
   voiceRequested: "studio/voice.requested",
   signalsRecompute: "studio/signals.recompute",
+  radarRequested: "studio/radar.requested",
 } as const;
 
 export interface IntegrationEventData {

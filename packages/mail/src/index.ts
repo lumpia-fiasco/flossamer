@@ -24,6 +24,9 @@ export interface SourceHeaders extends MessageHeaders {
   date: string;
   /** RFC 5322 Message-ID, for threading drafts. */
   messageId: string | null;
+  /** Newsletter headers, for suggesting sources (IR-02). Headers only; bodies are never read. */
+  listId?: string | null;
+  listUnsubscribeValue?: string | null;
 }
 
 export interface MailSource {
@@ -51,6 +54,8 @@ export interface BackfillHandlers {
   classifyUndecided(m: { from: string; subject: string; snippet: string }): Promise<Exclude<MailClass, "undecided">>;
   /** Receives business mail only. */
   onBusinessMessage(ref: MessageRef, headers: SourceHeaders, body: string): Promise<void>;
+  /** Automated mail, headers only (the body is never fetched). Used to spot newsletters. */
+  onAutomatedMessage?(ref: MessageRef, headers: SourceHeaders): Promise<void>;
   onProgress?(c: Checkpoint): void;
 }
 
@@ -77,6 +82,8 @@ export async function processPage(opts: {
     }
     if (mailClass === "business") {
       await handlers.onBusinessMessage(ref, h, await source.body(ref.id));
+    } else if (mailClass === "automated") {
+      await handlers.onAutomatedMessage?.(ref, h);
     }
     await store.markSeen(ref.id, mailClass);
     processed++;

@@ -4,6 +4,7 @@ import { NonRetriableError } from "inngest";
 import * as repo from "@flossamer/db";
 import { db } from "@/lib/db";
 import * as ingest from "@/lib/ingest";
+import { runRadar } from "@/lib/radar";
 import { EVENTS, inngest, type IntegrationEventData } from "./client";
 
 /** Threads per extraction step: small enough to finish well inside a serverless timeout. */
@@ -130,4 +131,30 @@ export const dailySignals = inngest.createFunction(
   },
 );
 
-export const functions = [backfill, sync, syncAll, dailySignals];
+/** Industry radar: once a day for every studio with a source switched on, or on request. */
+export const radarDaily = inngest.createFunction(
+  { id: "radar-daily", triggers: [{ cron: "0 14 * * *" }] },
+  async ({ step }) => {
+    const studios = await step.run("list", () => repo.studiosForRadar(db()));
+    if (studios.length > 0) {
+      await step.sendEvent("fan-out", studios.map((studioId) => ({ name: EVENTS.radarRequested, data: { studioId } })));
+    }
+  },
+);
+
+export const radar = inngest.createFunction(
+  {
+    id: "radar-run",
+    triggers: [{ event: EVENTS.radarRequested }],
+    concurrency: { key: "event.data.studioId", limit: 1 },
+    // A manual "check now" shortly after the daily run shouldn't read everything twice.
+    debounce: { key: "event.data.studioId", period: "2m" },
+    retries: 2,
+  },
+  async ({ event, step }) => {
+    const { studioId } = event.data as { studioId: string };
+    return step.run("radar", () => runRadar(studioId));
+  },
+);
+
+export const functions = [backfill, sync, syncAll, dailySignals, radarDaily, radar];

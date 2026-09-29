@@ -8,7 +8,7 @@ export const MODEL = "claude-opus-5";
  * Per-task model override. Mail classification runs on every undecided message,
  * so it's the first place to consider a cheaper model once quality is measured.
  */
-export const modelFor = (task: "classify" | "extract" | "draft" | "voice") =>
+export const modelFor = (task: "classify" | "extract" | "draft" | "voice" | "radar") =>
   process.env[`FLOSSAMER_MODEL_${task.toUpperCase()}`] ?? MODEL;
 
 export type Effort = "low" | "medium" | "high";

@@ -2,6 +2,7 @@ import { classifyMessage, extractThread, learnVoice, type ThreadExtraction } fro
 import { addDays, counterpartOf, detectAll, isoDay, type OpportunitySignal } from "@flossamer/core";
 import * as repo from "@flossamer/db";
 import { GmailSource, processPage, type SourceHeaders } from "@flossamer/mail";
+import { feedFromNewsletterHeaders } from "@flossamer/radar";
 import { decrypt } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import { required } from "@/lib/env";
@@ -77,6 +78,12 @@ export async function ingestPage(opts: {
           expectsReply: sent && repo.expectsReply(body),
         });
         newThreadIds.add(h.threadId);
+      },
+      // IR-02 (opt-in): suggest newsletters the user already gets, from headers alone.
+      async onAutomatedMessage(_ref, h) {
+        if (!studio.radar_newsletters) return;
+        const feed = feedFromNewsletterHeaders({ listId: h.listId ?? null, listUnsubscribe: h.listUnsubscribeValue ?? null, from: h.from });
+        if (feed) await repo.addSource(conn, studio.id, { ...feed, origin: "newsletter", enabled: false });
       },
     },
   });
@@ -188,10 +195,12 @@ export async function learnStudioVoice(studioId: string, integrationId: string) 
   await repo.updateStudio(conn, studioId, { voice });
 }
 
-/** Types the detectors own. Anything else (inquiries, deferred intent) comes from extraction. */
+/** Types the detectors own. Inquiries and deferred intent come from extraction, trends and ideas from the radar. */
 const DETECTOR_OWNED = new Set(["stalled", "waiting", "reconnect"]);
+/** Coming up kinds produced by the detectors; deferred intent comes from extraction, trends from the radar. */
+const DETECTOR_KINDS = new Set(["repeat_client_cycle", "job_change", "slow_season"]);
 const isDetectorOwned = (s: OpportunitySignal) =>
-  DETECTOR_OWNED.has(s.type) || (s.type === "coming_up" && s.comingUpKind !== "deferred_intent");
+  DETECTOR_OWNED.has(s.type) || (s.type === "coming_up" && s.comingUpKind !== null && DETECTOR_KINDS.has(s.comingUpKind));
 
 /** Re-run every deterministic detector and reconcile with what's stored. */
 export async function recomputeSignals(studioId: string) {

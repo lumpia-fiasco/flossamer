@@ -9,7 +9,7 @@
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
     "test": "vitest run",
-    "typecheck": "tsc -b packages/core packages/agents packages/mail packages/db && npm run typecheck -w web",
+    "typecheck": "tsc -b packages/core packages/agents packages/mail packages/db packages/radar && npm run typecheck -w web",
     "db:migrate": "npm run migrate -w @flossamer/db"
   },
   "devDependencies": {

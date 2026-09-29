@@ -84,6 +84,8 @@ export const SignalType = z.enum([
   "waiting",
   "reconnect",
   "coming_up",
+  /** Industry radar: a trend that matches a service the user offers (IR-06). */
+  "idea",
 ]);
 export type SignalType = z.infer<typeof SignalType>;
 
@@ -94,6 +96,8 @@ export const ComingUpKind = z.enum([
   "slow_season",
   "industry_season",
   "company_news",
+  /** Industry radar: a trend that affects this client (IR-05). */
+  "industry_trend",
 ]);
 export type ComingUpKind = z.infer<typeof ComingUpKind>;
 
@@ -115,6 +119,8 @@ export const OpportunitySignal = z.object({
   reachOutBy: z.string().nullable(),
   status: SignalStatus,
   createdAt: z.string().datetime(),
+  /** The publication a radar item came from. Always shown, always credited. */
+  link: z.object({ url: z.string().url(), title: z.string(), source: z.string() }).nullable().optional(),
 });
 export type OpportunitySignal = z.infer<typeof OpportunitySignal>;
 

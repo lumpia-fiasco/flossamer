@@ -1,6 +1,8 @@
+import { suggestSources } from "@flossamer/radar";
 import Link from "next/link";
+import { RadarSources } from "@/components/RadarSources";
 import { ExclusionFields, ProfileFields } from "@/components/StudioFields";
-import { deleteEverything, saveStudio, signOut } from "@/lib/actions";
+import { deleteEverything, saveRadarOptions, saveStudio, signOut } from "@/lib/actions";
 import { formatDate, loadStudio } from "@/lib/data";
 
 function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
@@ -16,6 +18,9 @@ function Section({ title, note, children }: { title: string; note?: string; chil
 export default async function Studio() {
   const data = await loadStudio();
   const { studio, connection } = data;
+  const profileText = Object.values(studio.profile).join(" ");
+  const followed = new Set(data.sources.map((s) => s.url));
+  const suggestions = suggestSources(profileText).filter((s) => !followed.has(s.url));
 
   return (
     <>
@@ -33,6 +38,24 @@ export default async function Studio() {
       </form>
 
       <div className="mt-10" />
+      <Section
+        title="Industry radar"
+        note="Flossamer reads the publications you follow and shows a trend only when it touches one of your clients or something you offer. A few a week at most, each linked to its source."
+      >
+        <form action={saveRadarOptions} className="mb-8 space-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="radar_enabled" defaultChecked={studio.radar_enabled} />
+            Read my publications for trends that matter to my clients
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="radar_newsletters" defaultChecked={studio.radar_newsletters} />
+            Suggest newsletters I already receive (from the sender details only; they&apos;re never opened)
+          </label>
+          <button className="mt-2 rounded-md border border-rule px-3 py-1.5">Save</button>
+        </form>
+        <RadarSources sources={data.sources} suggestions={suggestions} />
+      </Section>
+
       <Section title="Your voice" note="Learned from business mail you've sent. Drafts follow it.">
         {studio.voice ? (
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[10rem_1fr]">

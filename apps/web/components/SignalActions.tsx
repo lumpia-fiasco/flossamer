@@ -3,7 +3,15 @@
 import { useState, useTransition } from "react";
 import { createProjectFromSignal, markWrong, openDraft, snoozeSignal, type ActionResult } from "@/lib/actions";
 
-export function SignalActions({ signalId, canStartProject }: { signalId: string; canStartProject: boolean }) {
+export function SignalActions({
+  signalId,
+  canStartProject,
+  canDraft = true,
+}: {
+  signalId: string;
+  canStartProject: boolean;
+  canDraft?: boolean;
+}) {
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
@@ -23,13 +31,15 @@ export function SignalActions({ signalId, canStartProject }: { signalId: string;
   return (
     <div className="mt-4">
       <div className="flex flex-wrap gap-2 text-sm">
-        <button
-          disabled={pending}
-          onClick={() => run(() => openDraft(signalId), "Writing a draft in your voice...")}
-          className="rounded-md bg-ink px-3 py-1.5 text-paper disabled:opacity-60"
-        >
-          Open draft
-        </button>
+        {canDraft && (
+          <button
+            disabled={pending}
+            onClick={() => run(() => openDraft(signalId), "Writing a draft in your voice...")}
+            className="rounded-md bg-ink px-3 py-1.5 text-paper disabled:opacity-60"
+          >
+            Open draft
+          </button>
+        )}
         <button disabled={pending} onClick={() => run(() => snoozeSignal(signalId), "Snoozing for a week...")} className="rounded-md border border-rule px-3 py-1.5 disabled:opacity-60">
           Snooze a week
         </button>

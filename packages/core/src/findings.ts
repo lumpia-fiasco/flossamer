@@ -66,8 +66,8 @@ const CLIENT_TYPES = new Set(["client", "past_client"]);
  * the table, then introductions, then timed moments, then everything else.
  */
 function priority(s: OpportunitySignal): number {
-  const base = { inquiry: 5, intro: 4.5, coming_up: 4, waiting: 3.5, stalled: 3, reconnect: 2 }[s.type];
-  return base + s.confidence;
+  const base: Record<OpportunitySignal["type"], number> = { inquiry: 5, intro: 4.5, coming_up: 4, waiting: 3.5, stalled: 3, reconnect: 2, idea: 1 };
+  return base[s.type] + s.confidence;
 }
 
 export function composeFindings(input: {

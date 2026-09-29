@@ -8,6 +8,7 @@ import type { OpportunitySignal } from "./types";
 
 export const MAX_RECONNECTS = 3;
 export const MAX_COMING_UP = 3;
+export const MAX_IDEAS = 2;
 
 export interface Briefing {
   weekOf: string;
@@ -16,6 +17,7 @@ export interface Briefing {
   followUps: OpportunitySignal[];
   reconnects: OpportunitySignal[];
   comingUp: OpportunitySignal[];
+  ideas: OpportunitySignal[];
   isQuiet: boolean;
 }
 
@@ -46,6 +48,7 @@ export function composeBriefing(signals: OpportunitySignal[], now: string): Brie
       .sort(byConfidence)
       .slice(0, MAX_RECONNECTS),
     comingUp,
+    ideas: of("idea").sort(byConfidence).slice(0, MAX_IDEAS),
   };
 
   const total = Object.values(briefing).filter(Array.isArray).reduce((n, list) => n + list.length, 0);

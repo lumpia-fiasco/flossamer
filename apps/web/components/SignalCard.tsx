@@ -9,6 +9,7 @@ const KIND_LABEL: Record<NonNullable<OpportunitySignal["comingUpKind"]>, string>
   slow_season: "Your slow season",
   industry_season: "Industry season",
   company_news: "Company news",
+  industry_trend: "Industry trend",
 };
 
 /**
@@ -19,8 +20,10 @@ export function SignalCard({ signal, data }: { signal: OpportunitySignal; data: 
   const find = lookups(data);
   const person = find.person(signal.personId);
   const evidence = signal.evidence.map(find.interaction).filter((i) => i !== undefined);
-  const isSuggestion = signal.type === "coming_up" || signal.type === "reconnect";
-  const heading = person?.name ?? (signal.comingUpKind ? KIND_LABEL[signal.comingUpKind] : "Your studio");
+  const isSuggestion = signal.type === "coming_up" || signal.type === "reconnect" || signal.type === "idea";
+  const heading =
+    person?.name ??
+    (signal.type === "idea" ? `From ${signal.link?.source ?? "your reading"}` : signal.comingUpKind ? KIND_LABEL[signal.comingUpKind] : "Your studio");
 
   return (
     <article className="rounded-lg border border-rule bg-surface p-5">
@@ -46,6 +49,16 @@ export function SignalCard({ signal, data }: { signal: OpportunitySignal; data: 
         </p>
       )}
 
+      {signal.link && (
+        <p className="mt-3 text-sm text-muted">
+          Source:{" "}
+          <a href={signal.link.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-ink">
+            {signal.link.title}
+          </a>{" "}
+          · {signal.link.source}
+        </p>
+      )}
+
       {evidence.length > 0 && (
         <details className="mt-3 text-sm text-muted">
           <summary className="cursor-pointer select-none">
@@ -63,6 +76,8 @@ export function SignalCard({ signal, data }: { signal: OpportunitySignal; data: 
 
       {person ? (
         <SignalActions signalId={signal.id} canStartProject={signal.type === "inquiry" || signal.type === "intro"} />
+      ) : signal.type === "idea" ? (
+        <SignalActions signalId={signal.id} canStartProject={false} canDraft={false} />
       ) : (
         <p className="mt-4 text-sm text-muted">Pick a few past clients from People and open a reconnect draft for each.</p>
       )}

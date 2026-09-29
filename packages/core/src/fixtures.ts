@@ -132,3 +132,37 @@ export const sampleAgentSignals: OpportunitySignal[] = [
     createdAt: SAMPLE_NOW,
   },
 ];
+
+/** What the industry radar would add: one trend matched to a client, one idea. Sample content, not real news. */
+export const sampleRadarSignals: OpportunitySignal[] = [
+  {
+    id: "coming_up:trend:sample-1:elena",
+    type: "coming_up",
+    comingUpKind: "industry_trend",
+    personId: "elena",
+    evidence: ["article:sample-1"],
+    reason:
+      "Health providers are simplifying patient intake after new research on form drop-off. Elena's team shipped an intake flow with you that cut drop-off, so it's a natural reason to check in.",
+    confidence: 0.72,
+    windowOpens: null,
+    reachOutBy: "2026-10-08",
+    status: "open",
+    createdAt: SAMPLE_NOW,
+    link: { url: "https://example.com/sample-intake-research", title: "Why patients abandon intake forms (sample)", source: "Sample publication" },
+  },
+  {
+    id: "idea:sample-2",
+    type: "idea",
+    comingUpKind: null,
+    personId: null,
+    evidence: ["article:sample-2"],
+    reason:
+      "Product teams are adding AI features to design systems faster than they document them. You offer design systems: a short post on keeping AI components consistent could draw inquiries.",
+    confidence: 0.66,
+    windowOpens: null,
+    reachOutBy: null,
+    status: "open",
+    createdAt: SAMPLE_NOW,
+    link: { url: "https://example.com/sample-ai-design-systems", title: "Design systems in the age of AI features (sample)", source: "Sample publication" },
+  },
+];
