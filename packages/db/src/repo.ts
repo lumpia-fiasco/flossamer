@@ -40,12 +40,14 @@ export interface StudioRow {
   onboarded_at: string | null;
   radar_enabled: boolean;
   radar_newsletters: boolean;
+  linkedin_notifications: boolean;
+  linkedin_imported_at: string | null;
 }
 
 const STUDIO_COLUMNS =
-  "id, display_name, owner_email, profile, voice, exclusions, backfill_months, stages, onboarded_at, radar_enabled, radar_newsletters";
+  "id, display_name, owner_email, profile, voice, exclusions, backfill_months, stages, onboarded_at, radar_enabled, radar_newsletters, linkedin_notifications, linkedin_imported_at";
 
-const toStudio = (r: StudioRow): StudioRow => ({ ...r, onboarded_at: isoOrNull(r.onboarded_at) });
+const toStudio = (r: StudioRow): StudioRow => ({ ...r, onboarded_at: isoOrNull(r.onboarded_at), linkedin_imported_at: isoOrNull(r.linkedin_imported_at) });
 
 /** Sign-in: find or create the studio for a Google account. */
 export async function upsertStudioForGoogle(db: Db, account: { sub: string; email: string; name: string | null }) {
@@ -79,6 +81,7 @@ export async function updateStudio(
     onboarded: boolean;
     radar_enabled: boolean;
     radar_newsletters: boolean;
+    linkedin_notifications: boolean;
   }>,
 ) {
   await db.query(
@@ -89,7 +92,8 @@ export async function updateStudio(
        voice             = coalesce($6::jsonb, voice),
        onboarded_at      = case when $7 then coalesce(onboarded_at, now()) else onboarded_at end,
        radar_enabled     = coalesce($8, radar_enabled),
-       radar_newsletters = coalesce($9, radar_newsletters)
+       radar_newsletters = coalesce($9, radar_newsletters),
+       linkedin_notifications = coalesce($10, linkedin_notifications)
      where id = $1`,
     [
       studioId,
@@ -101,6 +105,7 @@ export async function updateStudio(
       patch.onboarded ?? false,
       patch.radar_enabled ?? null,
       patch.radar_newsletters ?? null,
+      patch.linkedin_notifications ?? null,
     ],
   );
 }
@@ -691,6 +696,8 @@ export async function exportStudio(db: Db, studioId: string) {
     signals: await q("select * from signals where studio_id = $1"),
     activity: await q("select * from agent_actions where studio_id = $1 order by at"),
     sources: await q("select id, url, title, origin, enabled, created_at from sources where studio_id = $1"),
+    linkedinConnections: await q("select * from linkedin_connections where studio_id = $1"),
+    linkedinEvents: await q("select * from linkedin_events where studio_id = $1 order by at"),
     articles: await q("select url, title, published_at, summary, triage from articles where studio_id = $1 order by created_at"),
   };
 }
@@ -826,8 +833,21 @@ export async function radarSignalCount(db: Db, studioId: string, since: string):
  * the user's own records only: email domains, project titles, recent subjects.
  */
 export async function clientFacts(db: Db, studioId: string): Promise<{ personId: string; name: string; facts: string[] }[]> {
-  const rows = await db.query<{ id: string; name: string; relationship: string; domains: string[] | null; projects: string[] | null; subjects: string[] | null }>(
+  const rows = await db.query<{
+    id: string;
+    name: string;
+    relationship: string;
+    domains: string[] | null;
+    projects: string[] | null;
+    subjects: string[] | null;
+    linkedin: string | null;
+    post: string | null;
+  }>(
     `select p.id, p.name, p.relationship->>'value' as relationship,
+       (select concat_ws(' at ', lc.position, lc.company) from linkedin_connections lc
+          where lc.studio_id = $1 and lc.person_id = p.id and lc.match in ('email','confirmed') limit 1) as linkedin,
+       (select le.text from linkedin_events le where le.studio_id = $1 and le.person_id = p.id and le.kind = 'post'
+          order by le.at desc limit 1) as post,
        (select array_agg(distinct split_part(e.email, '@', 2)) from person_emails e where e.person_id = p.id) as domains,
        (select array_agg(pr.title) from project_people pp join projects pr on pr.id = pp.project_id where pp.person_id = p.id) as projects,
        (select array_agg(subject) from (select i.subject from interactions i where i.studio_id = $1 and i.person_id = p.id and i.subject <> ''
@@ -845,6 +865,174 @@ export async function clientFacts(db: Db, studioId: string): Promise<{ personId:
       ...(r.domains ?? []).map((d) => `Email domain: ${d}`),
       ...(r.projects ?? []).map((t) => `Project together: ${t}`),
       ...(r.subjects ?? []).map((t) => `Recent email subject: ${t}`),
+      ...(r.linkedin ? [`LinkedIn: ${r.linkedin}`] : []),
+      ...(r.post ? [`Recently posted on LinkedIn: ${r.post}`] : []),
     ],
   }));
+}
+
+// --- LinkedIn (LI-01 to LI-07) ---------------------------------------------------------
+
+export interface LinkedInRow {
+  profile_url: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  company: string | null;
+  position: string | null;
+  person_id: string | null;
+  match: "email" | "name" | "confirmed" | null;
+  previous_company: string | null;
+  previous_position: string | null;
+}
+
+export interface LinkedInImportResult {
+  total: number;
+  added: number;
+  matchedByEmail: number;
+  suggestedByName: number;
+  /** Known people whose company changed since the last import (LI-03). */
+  changes: { personId: string; name: string; before: string; after: string; company: string }[];
+}
+
+/**
+ * LI-01 to LI-03: store an export. Confirmed and email matches are never
+ * downgraded by a later name suggestion, and a changed company is remembered
+ * as the previous one so the change can be surfaced.
+ */
+export async function importLinkedIn(
+  db: Db,
+  studioId: string,
+  connections: {
+    profileUrl: string;
+    firstName: string;
+    lastName: string;
+    email: string | null;
+    company: string | null;
+    position: string | null;
+    connectedOn: string | null;
+  }[],
+  matches: { profileUrl: string; personId: string; how: "email" | "name" }[],
+  changed: (before: { company: string | null }, after: { company: string | null }) => boolean,
+): Promise<LinkedInImportResult> {
+  const existing = new Map(
+    (await db.query<LinkedInRow>("select * from linkedin_connections where studio_id = $1", [studioId])).map((r) => [r.profile_url, r]),
+  );
+  const matchByUrl = new Map(matches.map((m) => [m.profileUrl, m]));
+  const result: LinkedInImportResult = { total: connections.length, added: 0, matchedByEmail: 0, suggestedByName: 0, changes: [] };
+
+  const rows = connections.map((c) => {
+    const prev = existing.get(c.profileUrl);
+    const m = matchByUrl.get(c.profileUrl);
+    // Keep a confirmed or email match; otherwise take this import's match.
+    const keep = prev?.person_id && (prev.match === "confirmed" || prev.match === "email");
+    const personId = keep ? prev!.person_id : (m?.personId ?? null);
+    const match = keep ? prev!.match : (m?.how ?? null);
+    const didChange = prev ? changed({ company: prev.company }, { company: c.company }) : false;
+
+    if (!prev) result.added++;
+    if (match === "email" || match === "confirmed") result.matchedByEmail++;
+    if (match === "name") result.suggestedByName++;
+    if (didChange && personId && (match === "email" || match === "confirmed")) {
+      result.changes.push({
+        personId,
+        name: `${c.firstName} ${c.lastName}`.trim(),
+        before: [prev!.position, prev!.company].filter(Boolean).join(" at "),
+        after: [c.position, c.company].filter(Boolean).join(" at "),
+        company: c.company!,
+      });
+    }
+    return {
+      profile_url: c.profileUrl,
+      first_name: c.firstName,
+      last_name: c.lastName,
+      email: c.email,
+      company: c.company,
+      position: c.position,
+      connected_on: c.connectedOn,
+      person_id: personId,
+      match,
+      previous_company: didChange ? prev!.company : (prev?.previous_company ?? null),
+      previous_position: didChange ? prev!.position : (prev?.previous_position ?? null),
+      changed: didChange,
+    };
+  });
+
+  // One statement for the whole file. Person ids are re-checked against this studio.
+  await db.query(
+    `insert into linkedin_connections
+       (studio_id, profile_url, first_name, last_name, email, company, position, connected_on, person_id, match, previous_company, previous_position, changed_at, imported_at)
+     select $1, x.profile_url, x.first_name, x.last_name, x.email, x.company, x.position, x.connected_on::date,
+            p.id, case when p.id is null then null else x.match end, x.previous_company, x.previous_position,
+            case when x.changed then now() end, now()
+     from jsonb_to_recordset($2::jsonb) as x(profile_url text, first_name text, last_name text, email text, company text, position text,
+                                            connected_on text, person_id uuid, match text, previous_company text, previous_position text, changed boolean)
+     left join people p on p.studio_id = $1 and p.id = x.person_id
+     on conflict (studio_id, profile_url) do update set
+       first_name = excluded.first_name, last_name = excluded.last_name, email = coalesce(excluded.email, linkedin_connections.email),
+       company = excluded.company, position = excluded.position, connected_on = excluded.connected_on,
+       person_id = excluded.person_id, match = excluded.match,
+       previous_company = excluded.previous_company, previous_position = excluded.previous_position,
+       changed_at = coalesce(excluded.changed_at, linkedin_connections.changed_at), imported_at = now()`,
+    [studioId, json(rows)],
+  );
+  await db.query("update studios set linkedin_imported_at = now() where id = $1", [studioId]);
+  return result;
+}
+
+/** LinkedIn details for people, keyed by person id: confirmed and email matches only. */
+export async function linkedInByPerson(db: Db, studioId: string): Promise<Map<string, LinkedInRow>> {
+  const rows = await db.query<LinkedInRow>(
+    "select * from linkedin_connections where studio_id = $1 and person_id is not null and match in ('email','confirmed')",
+    [studioId],
+  );
+  return new Map(rows.map((r) => [r.person_id!, r]));
+}
+
+export async function suggestedLinkedInMatches(db: Db, studioId: string): Promise<(LinkedInRow & { person_name: string })[]> {
+  return db.query(
+    `select lc.*, p.name as person_name from linkedin_connections lc join people p on p.id = lc.person_id
+     where lc.studio_id = $1 and lc.match = 'name' order by p.name`,
+    [studioId],
+  );
+}
+
+export async function resolveLinkedInMatch(db: Db, studioId: string, profileUrl: string, accept: boolean) {
+  await db.query(
+    `update linkedin_connections set match = case when $3 then 'confirmed' else null end,
+       person_id = case when $3 then person_id else null end
+     where studio_id = $1 and profile_url = $2 and match = 'name'`,
+    [studioId, profileUrl, accept],
+  );
+}
+
+/** LI-05: other connections at the same company, as possible introductions. */
+export async function connectionsAt(db: Db, studioId: string, company: string, excludeProfileUrl: string | null, limit = 8) {
+  return db.query<{ first_name: string; last_name: string; position: string | null; profile_url: string }>(
+    `select first_name, last_name, position, profile_url from linkedin_connections
+     where studio_id = $1 and lower(company) = lower($2) and profile_url is distinct from $3
+     order by last_name limit $4`,
+    [studioId, company, excludeProfileUrl, limit],
+  );
+}
+
+export async function addLinkedInEvent(
+  db: Db,
+  studioId: string,
+  e: { personId: string; kind: "new_position" | "post"; text: string; at: string; messageId: string },
+) {
+  await db.query(
+    `insert into linkedin_events (studio_id, person_id, kind, text, at, message_id)
+     select $1, id, $3, $4, $5, $6 from people where studio_id = $1 and id = $2
+     on conflict (studio_id, message_id) do nothing`,
+    [studioId, e.personId, e.kind, e.text, e.at, e.messageId],
+  );
+}
+
+export async function listLinkedInEvents(db: Db, studioId: string, personId: string) {
+  const rows = await db.query<{ kind: "new_position" | "post"; text: string; at: unknown }>(
+    "select kind, text, at from linkedin_events where studio_id = $1 and person_id = $2 order by at desc limit 20",
+    [studioId, personId],
+  );
+  return rows.map((r) => ({ ...r, at: iso(r.at) }));
 }

@@ -56,6 +56,12 @@ export default async function Studio() {
         <RadarSources sources={data.sources} suggestions={suggestions} />
       </Section>
 
+      <Section title="LinkedIn" note="Roles, companies and job changes from your LinkedIn data export, and optionally from LinkedIn's notification emails. Flossamer never logs into LinkedIn.">
+        <Link href="/studio/linkedin" className="underline">
+          {studio.linkedin_imported_at ? `Last imported ${formatDate(studio.linkedin_imported_at)}. Import again or manage` : "Import your LinkedIn connections"}
+        </Link>
+      </Section>
+
       <Section title="Your voice" note="Learned from business mail you've sent. Drafts follow it.">
         {studio.voice ? (
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[10rem_1fr]">

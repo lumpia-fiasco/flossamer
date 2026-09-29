@@ -1,4 +1,4 @@
-import type { OpportunitySignal } from "@flossamer/core";
+import { companyChanged, type OpportunitySignal } from "@flossamer/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "./client";
 import * as repo from "./repo";
@@ -233,5 +233,62 @@ describe("industry radar", () => {
     expect((await repo.getSignal(db, a, "idea:1"))!.link).toEqual({ url: "https://example.com/p1", title: "Post", source: "Example" });
     expect(await repo.radarSignalCount(db, a, "2000-01-01")).toBe(1);
     expect(await repo.radarSignalCount(db, b, "2000-01-01")).toBe(0);
+  });
+});
+
+describe("LinkedIn", () => {
+  const conn = (company: string, extra: Partial<{ email: string | null; position: string }> = {}) => ({
+    profileUrl: "https://www.linkedin.com/in/mayachen",
+    firstName: "Maya",
+    lastName: "Chen",
+    email: extra.email ?? null,
+    company,
+    position: extra.position ?? "Director of Design",
+    connectedOn: "2024-09-15",
+  });
+
+  it("detects a job change on re-import, for people matched by email", async () => {
+    const maya = await repo.resolvePerson(db, a, "maya@northwind.com");
+    const first = await repo.importLinkedIn(db, a, [conn("Northwind", { email: "maya@northwind.com" })], [{ profileUrl: conn("").profileUrl, personId: maya, how: "email" }], companyChanged);
+    expect(first).toMatchObject({ total: 1, added: 1, matchedByEmail: 1, changes: [] });
+
+    const second = await repo.importLinkedIn(db, a, [conn("Atlas", { position: "Head of Design" })], [], companyChanged);
+    expect(second.changes).toEqual([
+      { personId: maya, name: "Maya Chen", before: "Director of Design at Northwind", after: "Head of Design at Atlas", company: "Atlas" },
+    ]);
+    // The email match survives an import that didn't re-match it.
+    expect((await repo.linkedInByPerson(db, a)).get(maya)).toMatchObject({ company: "Atlas", previous_company: "Northwind", match: "email" });
+  });
+
+  it("keeps name matches as suggestions until the user confirms", async () => {
+    const maya = await repo.resolvePerson(db, a, "maya@northwind.com");
+    await repo.importLinkedIn(db, a, [conn("Northwind")], [{ profileUrl: conn("").profileUrl, personId: maya, how: "name" }], companyChanged);
+    expect((await repo.linkedInByPerson(db, a)).size).toBe(0);
+    expect(await repo.suggestedLinkedInMatches(db, a)).toHaveLength(1);
+
+    await repo.resolveLinkedInMatch(db, a, conn("").profileUrl, true);
+    expect((await repo.linkedInByPerson(db, a)).get(maya)?.match).toBe("confirmed");
+    expect(await repo.suggestedLinkedInMatches(db, a)).toHaveLength(0);
+  });
+
+  it("never links another studio's person, and keeps connections per studio", async () => {
+    const maya = await repo.resolvePerson(db, a, "maya@northwind.com");
+    await repo.importLinkedIn(db, b, [conn("Northwind")], [{ profileUrl: conn("").profileUrl, personId: maya, how: "email" }], companyChanged);
+    expect((await repo.linkedInByPerson(db, b)).size).toBe(0);
+    expect(await repo.connectionsAt(db, a, "Northwind", null)).toEqual([]);
+    expect(await repo.connectionsAt(db, b, "northwind", null)).toHaveLength(1);
+
+    await repo.addLinkedInEvent(db, b, { personId: maya, kind: "post", text: "x", at: "2026-09-01T00:00:00Z", messageId: "m1" });
+    expect(await repo.listLinkedInEvents(db, a, maya)).toEqual([]);
+  });
+
+  it("records LinkedIn events once and adds them to what the radar knows", async () => {
+    const maya = await repo.resolvePerson(db, a, "maya@northwind.com");
+    await repo.setRelationship(db, a, maya, "past_client");
+    const post = { personId: maya, kind: "post" as const, text: "What we learned redesigning checkout", at: "2026-09-20T00:00:00Z", messageId: "li-1" };
+    await repo.addLinkedInEvent(db, a, post);
+    await repo.addLinkedInEvent(db, a, post);
+    expect(await repo.listLinkedInEvents(db, a, maya)).toHaveLength(1);
+    expect((await repo.clientFacts(db, a))[0]!.facts).toContain("Recently posted on LinkedIn: What we learned redesigning checkout");
   });
 });

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { PersonReview } from "@/components/PersonReview";
 import { RELATIONSHIP_LABEL } from "@/lib/labels";
 import { SignalCard } from "@/components/SignalCard";
-import { formatDate, loadStudio, lookups } from "@/lib/data";
+import { formatDate, loadPersonLinkedIn, loadStudio, lookups } from "@/lib/data";
 
 /** CN-08: one timeline per person. */
 export default async function PersonPage({ params }: PageProps<"/people/[id]">) {
@@ -17,6 +17,7 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
   const signals = data.signals.filter((s) => s.personId === person.id && s.status === "open");
   const projects = data.projects.filter((p) => p.personIds.includes(person.id));
   const referrer = find.person(person.referredById);
+  const linkedin = await loadPersonLinkedIn(person.id);
 
   return (
     <>
@@ -28,6 +29,15 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
         {person.confirmed ? RELATIONSHIP_LABEL[person.relationship.value] : "Not confirmed yet"} · {person.emails.join(", ")}
         {referrer && <> · introduced by {referrer.name}</>}
       </p>
+      {linkedin?.role && (
+        <p className="mt-1 text-sm">
+          On LinkedIn:{" "}
+          <a href={linkedin.profileUrl} target="_blank" rel="noopener noreferrer" className="underline">
+            {linkedin.role}
+          </a>
+          {linkedin.previous && <span className="text-muted"> · previously {linkedin.previous}</span>}
+        </p>
+      )}
       {!person.confirmed && <PersonReview personId={person.id} suggested={person.relationship.value} />}
 
       {signals.length > 0 && (
@@ -45,6 +55,39 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
             {projects.map((p) => (
               <li key={p.id}>
                 {p.title} <span className="text-muted">· {p.stage}{p.paidAmount !== null && ` · paid $${p.paidAmount.toLocaleString("en-US")}`}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {linkedin && linkedin.colleagues.length > 0 && (
+        <section className="mt-10">
+          <h2 className="font-serif text-2xl tracking-tight">You also know at {linkedin.role?.split(" at ").at(-1)}</h2>
+          <p className="mt-1 text-sm text-muted">From your LinkedIn connections. Useful for introductions.</p>
+          <ul className="mt-3 space-y-1">
+            {linkedin.colleagues.map((c) => (
+              <li key={c.profileUrl}>
+                <a href={c.profileUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                  {c.name}
+                </a>
+                {c.position && <span className="text-muted"> · {c.position}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {linkedin && linkedin.events.length > 0 && (
+        <section className="mt-10">
+          <h2 className="font-serif text-2xl tracking-tight">On LinkedIn</h2>
+          <ul className="mt-3 space-y-2">
+            {linkedin.events.map((e) => (
+              <li key={`${e.at}-${e.text}`}>
+                <p className="text-sm text-muted">
+                  {formatDate(e.at)} · {e.kind === "post" ? "Posted" : "New position"}
+                </p>
+                <p className="text-pretty">{e.text}</p>
               </li>
             ))}
           </ul>

@@ -24,6 +24,7 @@ packages/radar    Industry radar: RSS/Atom reading, starter sources, newsletter 
 5. **Sync.** Every 10 minutes for live integrations, plus a daily pass so time-based signals move along.
 6. **Drafts.** "Open draft" writes a grounded draft in the user's voice and saves it to Gmail Drafts. There is no send path.
 7. **Industry radar.** Daily, Flossamer reads new public posts from the publications a user follows. A cheap triage pass picks a few, and those are read against the user's services and the facts it holds about their clients. Only client matches (Coming up) and service matches (Worth writing about) surface, at most 3 a week, each linked to its source. Stored: link, title and one line; never the article.
+8. **LinkedIn, from data the user owns.** The user uploads LinkedIn's data export; the browser opens the zip and sends only Connections.csv. Connections match known people by email automatically, and by exact name only after the user confirms. Re-imports surface job changes. Optionally, the subject lines of LinkedIn notification emails (never their bodies) turn a confirmed person's new job into a Coming up item. Flossamer never logs into, scrapes or automates LinkedIn.
 
 ## Run it
 
@@ -73,6 +74,7 @@ npm run typecheck
 | TD-01 to TD-05 This week | `packages/core/src/briefing.ts`, `apps/web/app/(app)/page.tsx` |
 | WK-01 to WK-04, WK-11 Work | `apps/web/app/(app)/work/page.tsx` |
 | IR-01 to IR-07 industry radar | `packages/radar`, `packages/agents/src/radar.ts`, `apps/web/lib/radar.ts` |
+| LI-01 to LI-07 LinkedIn export and notifications | `packages/core/src/linkedin.ts`, `apps/web/lib/linkedin.ts`, `apps/web/app/(app)/studio/linkedin/` |
 | Gate 0 findings report | `packages/core/src/findings.ts`, `apps/web/app/(app)/report/page.tsx` |
 | TR-01 to TR-04 activity log, export, delete | `apps/web/app/(app)/studio/`, `apps/web/app/api/export/route.ts` |
 

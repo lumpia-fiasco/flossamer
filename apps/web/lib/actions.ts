@@ -10,6 +10,7 @@ import { decrypt } from "@/lib/crypto";
 import { isDemo } from "@/lib/env";
 import { EVENTS, inngest } from "@/lib/inngest/client";
 import { gmailFor } from "@/lib/ingest";
+import { importLinkedInExport } from "@/lib/linkedin";
 import { STARTER_SOURCES, fetchFeed } from "@flossamer/radar";
 import { currentStudio } from "@/lib/session";
 
@@ -325,4 +326,40 @@ export async function checkRadarNow(): Promise<ActionResult> {
   const { studioId } = await currentStudio();
   await requestRadar(studioId);
   return { ok: true };
+}
+
+// --- LinkedIn (LI-01 to LI-07) ---------------------------------------------------------
+
+export type LinkedInImportSummary =
+  | { ok: true; total: number; added: number; matchedByEmail: number; suggestedByName: number; jobChanges: number; skipped: number }
+  | { ok: false; message: string };
+
+/** LI-01: the browser sends only Connections.csv as text; the rest of the export stays on the user's computer. */
+export async function importLinkedIn(csv: string): Promise<LinkedInImportSummary> {
+  if (isDemo) return { ok: false, message: "This is the sample studio. Connect Gmail to import LinkedIn." };
+  if (csv.length > 3_500_000) return { ok: false, message: "That file is larger than a connections export should be." };
+  const { db, studioId } = await currentStudio();
+  try {
+    const r = await importLinkedInExport(db, studioId, csv);
+    refresh();
+    return { ok: true, total: r.total, added: r.added, matchedByEmail: r.matchedByEmail, suggestedByName: r.suggestedByName, jobChanges: r.jobChangeSignals, skipped: r.skipped };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+export async function resolveLinkedInSuggestion(profileUrl: string, accept: boolean): Promise<ActionResult> {
+  if (isDemo) return DEMO;
+  const { db, studioId } = await currentStudio();
+  await repo.resolveLinkedInMatch(db, studioId, profileUrl, accept);
+  await repo.logAction(db, studioId, { agent: "user", trigger: accept ? "linkedin_match_confirmed" : "linkedin_match_rejected", proposed: { profileUrl }, approval: accept ? "approved" : "rejected" });
+  refresh();
+  return { ok: true };
+}
+
+export async function saveLinkedInOptions(form: FormData): Promise<void> {
+  if (isDemo) return;
+  const { db, studioId } = await currentStudio();
+  await repo.updateStudio(db, studioId, { linkedin_notifications: form.get("linkedin_notifications") === "on" });
+  refresh();
 }

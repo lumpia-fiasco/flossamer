@@ -34,7 +34,17 @@ export interface StudioData {
   now: string;
   studio: Pick<
     repo.StudioRow,
-    "display_name" | "profile" | "voice" | "exclusions" | "stages" | "backfill_months" | "onboarded_at" | "radar_enabled" | "radar_newsletters"
+    | "display_name"
+    | "profile"
+    | "voice"
+    | "exclusions"
+    | "stages"
+    | "backfill_months"
+    | "onboarded_at"
+    | "radar_enabled"
+    | "radar_newsletters"
+    | "linkedin_notifications"
+    | "linkedin_imported_at"
   >;
   connection: Connection | null;
   people: Person[];
@@ -59,6 +69,8 @@ const DEMO_STUDIO: StudioData["studio"] = {
   onboarded_at: SAMPLE_NOW,
   radar_enabled: true,
   radar_newsletters: false,
+  linkedin_notifications: false,
+  linkedin_imported_at: null,
 };
 
 const sampleSources: repo.SourceRow[] = [
@@ -169,5 +181,30 @@ export async function loadReport(): Promise<ReportData> {
     data,
     report: composeFindings({ ...data, mail }),
     gateZero: gateZeroOutcome({ ...events, now: data.now }),
+  };
+}
+
+export interface PersonLinkedIn {
+  role: string | null;
+  profileUrl: string;
+  previous: string | null;
+  colleagues: { name: string; position: string | null; profileUrl: string }[];
+  events: { kind: "new_position" | "post"; text: string; at: string }[];
+}
+
+/** LI-04, LI-05, LI-07: what LinkedIn adds to one person's page. */
+export async function loadPersonLinkedIn(personId: string): Promise<PersonLinkedIn | null> {
+  if (isDemo) return null;
+  const { db, studioId } = await currentStudio();
+  const [byPerson, events] = await Promise.all([repo.linkedInByPerson(db, studioId), repo.listLinkedInEvents(db, studioId, personId)]);
+  const row = byPerson.get(personId);
+  if (!row && events.length === 0) return null;
+  const colleagues = row?.company ? await repo.connectionsAt(db, studioId, row.company, row.profile_url) : [];
+  return {
+    role: row ? [row.position, row.company].filter(Boolean).join(" at ") || null : null,
+    profileUrl: row?.profile_url ?? "",
+    previous: row?.previous_company ? [row.previous_position, row.previous_company].filter(Boolean).join(" at ") : null,
+    colleagues: colleagues.map((c) => ({ name: `${c.first_name} ${c.last_name}`.trim(), position: c.position, profileUrl: c.profile_url })),
+    events,
   };
 }

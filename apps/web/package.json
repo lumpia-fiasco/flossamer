@@ -12,14 +12,15 @@
   "dependencies": {
     "@flossamer/agents": "*",
     "@flossamer/core": "*",
+    "@flossamer/db": "*",
     "@flossamer/mail": "*",
+    "@flossamer/radar": "*",
+    "fflate": "^0.8.3",
     "inngest": "^4.21.0",
     "next": "16.3.6",
     "next-auth": "^5.0.0-beta.32",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "@flossamer/db": "*",
-    "@flossamer/radar": "*"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

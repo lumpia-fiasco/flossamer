@@ -6,6 +6,7 @@ import { feedFromNewsletterHeaders } from "@flossamer/radar";
 import { decrypt } from "@/lib/crypto";
 import { db } from "@/lib/db";
 import { required } from "@/lib/env";
+import { handleLinkedInNotification } from "@/lib/linkedin";
 
 /**
  * Ingestion steps run by background jobs. Each function is one retryable unit
@@ -43,6 +44,7 @@ export async function ingestPage(opts: {
   const gmail = await gmailFor(studio.id, opts.integrationId);
   const filter = await repo.filterContext(conn, studio);
   const newThreadIds = new Set<string>();
+  let people: Awaited<ReturnType<typeof repo.listPeople>> | undefined;
 
   const result = await processPage({
     source: gmail,
@@ -79,11 +81,17 @@ export async function ingestPage(opts: {
         });
         newThreadIds.add(h.threadId);
       },
-      // IR-02 (opt-in): suggest newsletters the user already gets, from headers alone.
-      async onAutomatedMessage(_ref, h) {
-        if (!studio.radar_newsletters) return;
-        const feed = feedFromNewsletterHeaders({ listId: h.listId ?? null, listUnsubscribe: h.listUnsubscribeValue ?? null, from: h.from });
-        if (feed) await repo.addSource(conn, studio.id, { ...feed, origin: "newsletter", enabled: false });
+      // Opt-ins that use automated mail by its headers alone; the body is never fetched.
+      async onAutomatedMessage(ref, h) {
+        if (studio.linkedin_notifications && /@([a-z0-9-]+\.)*linkedin\.com>?\s*$/i.test(h.from.trim())) {
+          people ??= await repo.listPeople(conn, studio.id);
+          await handleLinkedInNotification(conn, studio.id, ref.id, h, people); // LI-06, LI-07
+          return;
+        }
+        if (studio.radar_newsletters) {
+          const feed = feedFromNewsletterHeaders({ listId: h.listId ?? null, listUnsubscribe: h.listUnsubscribeValue ?? null, from: h.from });
+          if (feed) await repo.addSource(conn, studio.id, { ...feed, origin: "newsletter", enabled: false }); // IR-02
+        }
       },
     },
   });
@@ -200,7 +208,8 @@ const DETECTOR_OWNED = new Set(["stalled", "waiting", "reconnect"]);
 /** Coming up kinds produced by the detectors; deferred intent comes from extraction, trends from the radar. */
 const DETECTOR_KINDS = new Set(["repeat_client_cycle", "job_change", "slow_season"]);
 const isDetectorOwned = (s: OpportunitySignal) =>
-  DETECTOR_OWNED.has(s.type) || (s.type === "coming_up" && s.comingUpKind !== null && DETECTOR_KINDS.has(s.comingUpKind));
+  !s.id.startsWith("coming_up:li-") && // LinkedIn job changes come from imports and notifications
+  (DETECTOR_OWNED.has(s.type) || (s.type === "coming_up" && s.comingUpKind !== null && DETECTOR_KINDS.has(s.comingUpKind)));
 
 /** Re-run every deterministic detector and reconcile with what's stored. */
 export async function recomputeSignals(studioId: string) {
